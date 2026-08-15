@@ -4,6 +4,7 @@ import test from "node:test";
 const calculatorUrl = new URL("../app/lib/calculate.ts", import.meta.url).href;
 const {
   calculateProduction,
+  calculateProductionPlan,
   ProductionCalculationError,
 } = await import(calculatorUrl);
 
@@ -136,6 +137,176 @@ test("aggregates a shared intermediate before rounding", () => {
   assert.equal(sharedRows[0]?.exactMachines, 0.8);
   assert.equal(sharedRows[0]?.roundedMachines, 1);
   assert.deepEqual(result.rawTotals, { ore: 48 });
+});
+
+test("combines unrelated production targets into one plan", () => {
+  const result = calculateProductionPlan({
+    items: [
+      item("iron", true),
+      item("copper", true),
+      item("plate"),
+      item("wire"),
+    ],
+    recipes: [
+      {
+        id: "plate",
+        outputId: "plate",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "smelter",
+        inputs: [{ itemId: "iron", qty: 1 }],
+      },
+      {
+        id: "wire",
+        outputId: "wire",
+        outputQty: 2,
+        timeSec: 1,
+        facility: "assembler",
+        inputs: [{ itemId: "copper", qty: 1 }],
+      },
+    ],
+    machines: baseMachines,
+    targets: [
+      { itemId: "plate", ratePerMin: 30 },
+      { itemId: "wire", ratePerMin: 20 },
+    ],
+  });
+
+  assert.deepEqual(result.targets, [
+    { itemId: "plate", ratePerMin: 30 },
+    { itemId: "wire", ratePerMin: 20 },
+  ]);
+  assert.deepEqual(result.rawTotals, { iron: 30, copper: 10 });
+  assert.deepEqual(
+    result.rows.map((row: { itemId: string }) => row.itemId),
+    ["plate", "wire"],
+  );
+});
+
+test("aggregates shared intermediates across targets before rounding", () => {
+  const result = calculateProductionPlan({
+    items: [
+      item("ore", true),
+      item("shared"),
+      item("left"),
+      item("right"),
+    ],
+    recipes: [
+      {
+        id: "shared",
+        outputId: "shared",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "smelter",
+        inputs: [{ itemId: "ore", qty: 1 }],
+      },
+      {
+        id: "left",
+        outputId: "left",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "assembler",
+        inputs: [{ itemId: "shared", qty: 1 }],
+      },
+      {
+        id: "right",
+        outputId: "right",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "assembler",
+        inputs: [{ itemId: "shared", qty: 1 }],
+      },
+    ],
+    machines: baseMachines,
+    targets: [
+      { itemId: "left", ratePerMin: 24 },
+      { itemId: "right", ratePerMin: 24 },
+    ],
+  });
+
+  const sharedRows = result.rows.filter(
+    (row: { itemId: string }) => row.itemId === "shared",
+  );
+  assert.equal(sharedRows.length, 1);
+  assert.equal(sharedRows[0]?.ratePerMin, 48);
+  assert.equal(sharedRows[0]?.craftsPerMin, 48);
+  assert.equal(sharedRows[0]?.exactMachines, 0.8);
+  assert.equal(sharedRows[0]?.roundedMachines, 1);
+  assert.deepEqual(result.rawTotals, { ore: 48 });
+});
+
+test("preserves duplicate target roots while aggregating their demand", () => {
+  const result = calculateProductionPlan({
+    items: [item("ore", true), item("plate")],
+    recipes: [
+      {
+        id: "plate",
+        outputId: "plate",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "smelter",
+        inputs: [{ itemId: "ore", qty: 2 }],
+      },
+    ],
+    machines: baseMachines,
+    targets: [
+      { itemId: "plate", ratePerMin: 20 },
+      { itemId: "plate", ratePerMin: 40 },
+    ],
+  });
+
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0]?.ratePerMin, 60);
+  assert.equal(result.rows[0]?.craftsPerMin, 60);
+  assert.deepEqual(result.rawTotals, { ore: 120 });
+  assert.deepEqual(
+    result.trees.map(
+      (tree: { itemId: string; ratePerMin: number }) => [
+        tree.itemId,
+        tree.ratePerMin,
+      ],
+    ),
+    [
+      ["plate", 20],
+      ["plate", 40],
+    ],
+  );
+});
+
+test("returns one per-target tree root in target order", () => {
+  const result = calculateProductionPlan({
+    items: [item("ore", true), item("plate"), item("gear")],
+    recipes: [
+      {
+        id: "plate",
+        outputId: "plate",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "smelter",
+        inputs: [{ itemId: "ore", qty: 1 }],
+      },
+      {
+        id: "gear",
+        outputId: "gear",
+        outputQty: 1,
+        timeSec: 1,
+        facility: "assembler",
+        inputs: [{ itemId: "plate", qty: 1 }],
+      },
+    ],
+    machines: baseMachines,
+    targets: [
+      { itemId: "gear", ratePerMin: 12 },
+      { itemId: "plate", ratePerMin: 18 },
+    ],
+  });
+
+  assert.equal(result.trees.length, 2);
+  assert.equal(result.trees[0]?.itemId, "gear");
+  assert.equal(result.trees[0]?.ratePerMin, 12);
+  assert.equal(result.trees[0]?.children[0]?.itemId, "plate");
+  assert.equal(result.trees[1]?.itemId, "plate");
+  assert.equal(result.trees[1]?.ratePerMin, 18);
 });
 
 test("honours explicit and rare-priority alternate recipe selection", () => {

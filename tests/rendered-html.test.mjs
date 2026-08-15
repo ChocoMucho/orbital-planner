@@ -24,7 +24,11 @@ test("server-renders the DSP production calculator", async () => {
   assert.match(html, /ORBITAL/);
   assert.match(html, /생산 목표/);
   assert.match(html, /소형 운반 로켓/);
+  assert.match(html, /태양 돛/);
+  assert.match(html, /생산 물품 추가/);
+  assert.match(html, /2(?:<!-- -->)? OUTPUTS/);
   assert.match(html, /필요 생산 라인/);
+  assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });
 

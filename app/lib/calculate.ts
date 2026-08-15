@@ -88,6 +88,14 @@ export interface CalculateProductionInput {
   selections?: ProductionSelections;
 }
 
+export interface CalculateProductionPlanInput {
+  items: DataCollection<Item>;
+  recipes: DataCollection<Recipe>;
+  machines: DataCollection<Machine>;
+  targets: readonly ProductionTarget[];
+  selections?: ProductionSelections;
+}
+
 export interface ProductionRow {
   itemId: string;
   item: Item;
@@ -126,6 +134,18 @@ export interface ProductionCalculationResult {
   rawTotals: Record<string, number>;
   byproducts: Record<string, number>;
   tree: ProductionTreeNode;
+  totalExactMachines: number;
+  totalRoundedMachines: number;
+  totalExactPowerMw: number;
+  totalPowerMw: number;
+}
+
+export interface ProductionPlanCalculationResult {
+  targets: ProductionTarget[];
+  rows: ProductionRow[];
+  rawTotals: Record<string, number>;
+  byproducts: Record<string, number>;
+  trees: ProductionTreeNode[];
   totalExactMachines: number;
   totalRoundedMachines: number;
   totalExactPowerMw: number;
@@ -262,37 +282,44 @@ function requireNonNegativeFinite(
 }
 
 /**
- * Calculate one production target in items per minute.
+ * Calculate multiple production targets in items per minute.
  *
- * Recipes are traversed as a single-primary-output dependency graph. Secondary
+ * Every target retains its own dependency tree, while production rows, raw
+ * resources, and byproducts are aggregated across the whole plan. Machine
+ * counts are rounded only after the shared demand has been combined. Secondary
  * outputs are reported as gross byproducts and deliberately are not fed back
  * into the graph; doing so greedily would make oil/hydrogen results depend on
  * traversal order.
  */
-export function calculateProduction(
-  input: CalculateProductionInput,
-): ProductionCalculationResult {
+export function calculateProductionPlan(
+  input: CalculateProductionPlanInput,
+): ProductionPlanCalculationResult {
   const itemIndex = indexCollection(input.items, "items");
   const recipeIndex = indexCollection(input.recipes, "recipes");
   const machineIndex = indexCollection(input.machines, "machines");
   const selections = input.selections ?? {};
 
-  const target: ProductionTarget = input.target ?? {
-    itemId: input.targetItemId ?? "",
-    ratePerMin: input.targetRatePerMin ?? Number.NaN,
-  };
-
-  if (!target.itemId) {
+  if (input.targets.length === 0) {
     throw new ProductionCalculationError(
       "INVALID_TARGET",
-      "A target item ID is required.",
+      "At least one production target is required.",
     );
   }
-  requirePositiveFinite(
-    target.ratePerMin,
-    "Target rate per minute",
-    "INVALID_TARGET",
-  );
+
+  const targets = input.targets.map((target, index) => {
+    if (!target.itemId) {
+      throw new ProductionCalculationError(
+        "INVALID_TARGET",
+        `Target ${index + 1} requires an item ID.`,
+      );
+    }
+    requirePositiveFinite(
+      target.ratePerMin,
+      `Target ${index + 1} rate per minute`,
+      "INVALID_TARGET",
+    );
+    return { ...target };
+  });
 
   const recipesByOutput = new Map<string, Recipe[]>();
   for (const recipe of recipeIndex.values()) {
@@ -551,7 +578,9 @@ export function calculateProduction(
     };
   }
 
-  const tree = expand(target.itemId, target.ratePerMin, []);
+  const trees = targets.map((target) =>
+    expand(target.itemId, target.ratePerMin, []),
+  );
 
   const rows: ProductionRow[] = [...rowTotals.values()].map((row) => {
     const craftsPerMachinePerMin =
@@ -571,11 +600,11 @@ export function calculateProduction(
     Object.fromEntries(values) as Record<string, number>;
 
   return {
-    target: { ...target },
+    targets,
     rows,
     rawTotals: recordFromMap(rawTotals),
     byproducts: recordFromMap(byproductTotals),
-    tree,
+    trees,
     totalExactMachines: rows.reduce(
       (total, row) => total + row.exactMachines,
       0,
@@ -589,5 +618,52 @@ export function calculateProduction(
       0,
     ),
     totalPowerMw: rows.reduce((total, row) => total + row.powerMw, 0),
+  };
+}
+
+/** Calculate one production target while preserving the original API. */
+export function calculateProduction(
+  input: CalculateProductionInput,
+): ProductionCalculationResult {
+  const target: ProductionTarget = input.target ?? {
+    itemId: input.targetItemId ?? "",
+    ratePerMin: input.targetRatePerMin ?? Number.NaN,
+  };
+  if (!target.itemId) {
+    throw new ProductionCalculationError(
+      "INVALID_TARGET",
+      "A target item ID is required.",
+    );
+  }
+  requirePositiveFinite(
+    target.ratePerMin,
+    "Target rate per minute",
+    "INVALID_TARGET",
+  );
+  const plan = calculateProductionPlan({
+    items: input.items,
+    recipes: input.recipes,
+    machines: input.machines,
+    targets: [target],
+    selections: input.selections,
+  });
+  const tree = plan.trees[0];
+  if (!tree) {
+    throw new ProductionCalculationError(
+      "INVALID_TARGET",
+      "A target item ID is required.",
+    );
+  }
+
+  return {
+    target: plan.targets[0] ?? { ...target },
+    rows: plan.rows,
+    rawTotals: plan.rawTotals,
+    byproducts: plan.byproducts,
+    tree,
+    totalExactMachines: plan.totalExactMachines,
+    totalRoundedMachines: plan.totalRoundedMachines,
+    totalExactPowerMw: plan.totalExactPowerMw,
+    totalPowerMw: plan.totalPowerMw,
   };
 }

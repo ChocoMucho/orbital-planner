@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
-  calculateProduction,
+  calculateProductionPlan,
   ProductionCalculationError,
-  type ProductionCalculationResult,
+  type ProductionPlanCalculationResult,
   type ProductionTreeNode,
 } from "./lib/calculate";
 import {
@@ -21,6 +21,7 @@ import {
 
 type Unit = "minute" | "second";
 type FactoryPreset = "starter" | "standard" | "darkfog";
+type TargetDraft = { id: string; itemId: string; rate: number; unit: Unit };
 
 const ITEM_MAP = new Map(ITEMS.map((item) => [item.id, item]));
 const TARGET_ITEMS = ITEMS.filter((item) => !item.raw);
@@ -114,10 +115,12 @@ function TreeBranch({ node, depth, path, beltCapacity }: { node: ProductionTreeN
 }
 
 export default function Home() {
-  const [targetId, setTargetId] = useState("small_carrier_rocket");
-  const [rate, setRate] = useState(60);
-  const [unit, setUnit] = useState<Unit>("minute");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [targets, setTargets] = useState<TargetDraft[]>([
+    { id: "target-1", itemId: "small_carrier_rocket", rate: 60, unit: "minute" },
+    { id: "target-2", itemId: "solar_sail", rate: 30, unit: "second" },
+  ]);
+  const nextTargetId = useRef(3);
+  const [pickerOpen, setPickerOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [rarePriority, setRarePriority] = useState(false);
   const [productMultiplier, setProductMultiplier] = useState(1);
@@ -125,9 +128,10 @@ export default function Home() {
   const [beltCapacity, setBeltCapacity] = useState(1800);
   const [copied, setCopied] = useState(false);
 
-  const target = ITEM_MAP.get(targetId) ?? TARGET_ITEMS[0];
-  const ratePerMin = unit === "second" ? rate * 60 : rate;
-  const increment = unit === "second" ? 1 : 10;
+  const planTargets = useMemo(() => targets.map((target) => ({
+    itemId: target.itemId,
+    ratePerMin: target.unit === "second" ? target.rate * 60 : target.rate,
+  })), [targets]);
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -135,14 +139,14 @@ export default function Home() {
     return TARGET_ITEMS.filter((item) => `${item.name} ${item.en}`.toLocaleLowerCase().includes(normalized));
   }, [query]);
 
-  const calculation = useMemo<{ result?: ProductionCalculationResult; error?: string }>(() => {
+  const calculation = useMemo<{ result?: ProductionPlanCalculationResult; error?: string }>(() => {
     try {
       return {
-        result: calculateProduction({
+        result: calculateProductionPlan({
           items: ITEMS,
           recipes: RECIPES,
           machines: MACHINES,
-          target: { itemId: targetId, ratePerMin },
+          targets: planTargets,
           selections: {
             rarePriority,
             productMultiplier,
@@ -156,7 +160,7 @@ export default function Home() {
         error: error instanceof ProductionCalculationError ? error.message : "계산 중 알 수 없는 오류가 발생했습니다.",
       };
     }
-  }, [factoryPreset, productMultiplier, rarePriority, ratePerMin, targetId]);
+  }, [factoryPreset, planTargets, productMultiplier, rarePriority]);
 
   const result = calculation.result;
   const rawEntries = useMemo(() => {
@@ -175,7 +179,7 @@ export default function Home() {
 
   const facilityGroups = useMemo(() => {
     if (!result) return [];
-    const groups = new Map<string, { machine: ProductionCalculationResult["rows"][number]["machine"]; count: number; power: number; lines: number }>();
+    const groups = new Map<string, { machine: ProductionPlanCalculationResult["rows"][number]["machine"]; count: number; power: number; lines: number }>();
     for (const row of result.rows) {
       const current = groups.get(row.machineId) ?? { machine: row.machine, count: 0, power: 0, lines: 0 };
       current.count += row.roundedMachines;
@@ -186,12 +190,40 @@ export default function Home() {
     return [...groups.values()].sort((a, b) => b.count - a.count);
   }, [result]);
 
-  const setQuickRate = (perMinute: number) => setRate(unit === "second" ? perMinute / 60 : perMinute);
+  const updateTarget = (id: string, patch: Partial<Omit<TargetDraft, "id">>) => {
+    setTargets((current) => current.map((target) => target.id === id ? { ...target, ...patch } : target));
+  };
+
+  const changeTargetUnit = (target: TargetDraft, nextUnit: Unit) => {
+    if (target.unit === nextUnit) return;
+    updateTarget(target.id, {
+      unit: nextUnit,
+      rate: nextUnit === "second"
+        ? Math.max(0.01, Number((target.rate / 60).toFixed(4)))
+        : Number((target.rate * 60).toFixed(2)),
+    });
+  };
+
+  const addTarget = () => {
+    const selected = new Set(targets.map((target) => target.itemId));
+    const nextItem = TARGET_ITEMS.find((item) => !selected.has(item.id));
+    if (!nextItem) return;
+    const id = `target-${nextTargetId.current++}`;
+    setTargets((current) => [...current, { id, itemId: nextItem.id, rate: 60, unit: "minute" }]);
+    setPickerOpen(id);
+    setQuery("");
+  };
+
+  const removeTarget = (id: string) => {
+    setTargets((current) => current.length > 1 ? current.filter((target) => target.id !== id) : current);
+    if (pickerOpen === id) setPickerOpen(null);
+  };
 
   const copySummary = async () => {
-    if (!result || !target) return;
+    if (!result) return;
     const lines = [
-      `[오비탈 플래너] ${target.name} ${formatNumber(ratePerMin)}/분`,
+      `[오비탈 플래너] ${targets.length}개 생산 목표`,
+      ...targets.map((target) => `${ITEM_MAP.get(target.itemId)?.name}: ${formatNumber(target.rate)}${target.unit === "second" ? "/초" : "/분"}`),
       `설비 ${formatNumber(result.totalRoundedMachines, 0)}대 · 기본 부하 ${formatNumber(result.totalPowerMw)} MW`,
       ...rawEntries.map(({ item, value }) => `${item.name}: ${formatNumber(value)}/분`),
     ];
@@ -223,71 +255,83 @@ export default function Home() {
         <div className="hero-copy-block">
           <p className="eyebrow">DYSON SPHERE PROGRAM · PRODUCTION CALCULATOR</p>
           <h1>성간 공장을<br /><em>숫자로 설계하세요.</em></h1>
-          <p className="hero-copy">목표 생산량 하나만 정하세요. 필요한 설비, 원료, 전력과 벨트 라인을 전체 생산 체인으로 역산합니다.</p>
+          <p className="hero-copy">생산할 물품을 원하는 만큼 쌓아두세요. 서로 겹치는 중간재를 합산해 필요한 설비, 원료, 전력과 벨트 라인을 하나의 공장 계획으로 역산합니다.</p>
           <div className="hero-facts" aria-label="계산기 기능">
             <span><b>{RECIPES.length}</b> 레시피</span>
             <span><b>{TARGET_ITEMS.length}</b> 목표 아이템</span>
-            <span><b>LIVE</b> 즉시 계산</span>
+            <span><b>MULTI</b> 다중 목표</span>
           </div>
         </div>
 
         <div className="target-panel">
-          <p className="panel-label"><span>01</span> 생산 목표 <i>OUTPUT TARGET</i></p>
-          <label>목표 아이템</label>
-          <div className="picker-wrap">
-            <button className="item-select" type="button" onClick={() => setPickerOpen((value) => !value)} aria-expanded={pickerOpen} aria-haspopup="listbox">
-              <ItemMark item={target} />
-              <span><b>{target.name}</b><small>{target.en}</small></span>
-              <span className="chevron" aria-hidden="true">⌄</span>
-            </button>
-            {pickerOpen && (
-              <div className="item-picker" onKeyDown={(event) => event.key === "Escape" && setPickerOpen(false)}>
-                <div className="picker-search">
-                  <span aria-hidden="true">⌕</span>
-                  <input autoFocus type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="아이템 검색" aria-label="아이템 검색" />
-                  <small>{filteredItems.length}</small>
-                </div>
-                <div className="picker-list" role="listbox" aria-label="목표 아이템">
-                  {Object.entries(CATEGORY_LABELS).filter(([category]) => category !== "raw").map(([category, label]) => {
-                    const entries = filteredItems.filter((item) => item.category === category);
-                    if (!entries.length) return null;
-                    return (
-                      <div className="picker-group" key={category}>
-                        <p>{label}</p>
-                        {entries.map((item) => (
-                          <button key={item.id} type="button" role="option" aria-selected={item.id === targetId} onClick={() => { setTargetId(item.id); setPickerOpen(false); setQuery(""); }}>
-                            <ItemMark item={item} small />
-                            <span><b>{item.name}</b><small>{item.en}</small></span>
-                            {item.id === targetId && <i>선택됨</i>}
-                          </button>
-                        ))}
+          <p className="panel-label"><span>01</span> 생산 목표 <i>{targets.length} OUTPUTS</i></p>
+          <div className="target-list">
+            {targets.map((draft, index) => {
+              const targetItem = ITEM_MAP.get(draft.itemId) ?? TARGET_ITEMS[0];
+              const entriesForTarget = filteredItems.filter((item) => item.id === draft.itemId || !targets.some((other) => other.id !== draft.id && other.itemId === item.id));
+              const increment = draft.unit === "second" ? 1 : 10;
+              return (
+                <div className="target-entry" key={draft.id}>
+                  <div className="target-entry-head">
+                    <span>OUTPUT {String(index + 1).padStart(2, "0")}</span>
+                    <button type="button" onClick={() => removeTarget(draft.id)} disabled={targets.length === 1} aria-label={`${targetItem.name} 생산 목표 삭제`}>×</button>
+                  </div>
+                  <div className="target-entry-controls">
+                    <div className="picker-wrap">
+                      <button className="item-select item-select--compact" type="button" onClick={() => { setPickerOpen((value) => value === draft.id ? null : draft.id); setQuery(""); }} aria-expanded={pickerOpen === draft.id} aria-haspopup="listbox">
+                        <ItemMark item={targetItem} small />
+                        <span><b>{targetItem.name}</b><small>{targetItem.en}</small></span>
+                        <span className="chevron" aria-hidden="true">⌄</span>
+                      </button>
+                      {pickerOpen === draft.id && (
+                        <div className="item-picker" onKeyDown={(event) => event.key === "Escape" && setPickerOpen(null)}>
+                          <div className="picker-search">
+                            <span aria-hidden="true">⌕</span>
+                            <input autoFocus type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="아이템 검색" aria-label={`${index + 1}번째 목표 아이템 검색`} />
+                            <small>{entriesForTarget.length}</small>
+                          </div>
+                          <div className="picker-list" role="listbox" aria-label={`${index + 1}번째 목표 아이템`}>
+                            {Object.entries(CATEGORY_LABELS).filter(([category]) => category !== "raw").map(([category, label]) => {
+                              const entries = entriesForTarget.filter((item) => item.category === category);
+                              if (!entries.length) return null;
+                              return (
+                                <div className="picker-group" key={category}>
+                                  <p>{label}</p>
+                                  {entries.map((item) => (
+                                    <button key={item.id} type="button" role="option" aria-selected={item.id === draft.itemId} onClick={() => { updateTarget(draft.id, { itemId: item.id }); setPickerOpen(null); setQuery(""); }}>
+                                      <ItemMark item={item} small />
+                                      <span><b>{item.name}</b><small>{item.en}</small></span>
+                                      {item.id === draft.itemId && <i>선택됨</i>}
+                                    </button>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                            {!entriesForTarget.length && <p className="empty-search">일치하는 아이템이 없습니다.</p>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="target-rate-control">
+                      <div className="rate-control rate-control--compact">
+                        <button type="button" onClick={() => updateTarget(draft.id, { rate: Math.max(0.01, draft.rate - increment) })} aria-label={`${targetItem.name} 생산량 감소`}>−</button>
+                        <input id={`target-rate-${draft.id}`} aria-label={`${targetItem.name} 목표 생산량`} type="number" min="0.01" step={draft.unit === "second" ? 0.1 : 1} value={draft.rate} onChange={(event) => updateTarget(draft.id, { rate: Math.max(0.01, Number(event.target.value) || 0.01) })} />
+                        <button type="button" onClick={() => updateTarget(draft.id, { rate: draft.rate + increment })} aria-label={`${targetItem.name} 생산량 증가`}>＋</button>
                       </div>
-                    );
-                  })}
-                  {!filteredItems.length && <p className="empty-search">일치하는 아이템이 없습니다.</p>}
+                      <div className="unit-tabs" role="group" aria-label={`${targetItem.name} 생산량 단위`}>
+                        <button type="button" className={draft.unit === "minute" ? "active" : ""} onClick={() => changeTargetUnit(draft, "minute")}>/분</button>
+                        <button type="button" className={draft.unit === "second" ? "active" : ""} onClick={() => changeTargetUnit(draft, "second")}>/초</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })}
           </div>
-
-          <div className="rate-label-row">
-            <label htmlFor="target-rate">목표 생산량</label>
-            <div className="unit-tabs" role="group" aria-label="생산량 단위">
-              <button type="button" className={unit === "minute" ? "active" : ""} onClick={() => { if (unit === "second") setRate(rate * 60); setUnit("minute"); }}>/분</button>
-              <button type="button" className={unit === "second" ? "active" : ""} onClick={() => { if (unit === "minute") setRate(rate / 60); setUnit("second"); }}>/초</button>
-            </div>
-          </div>
-          <div className="rate-control">
-            <button type="button" onClick={() => setRate(Math.max(0.01, rate - increment))} aria-label={`생산량 ${increment} 감소`}>−</button>
-            <input id="target-rate" type="number" min="0.01" step={unit === "second" ? 0.1 : 1} value={rate} onChange={(event) => setRate(Math.max(0.01, Number(event.target.value) || 0.01))} />
-            <span>/{unit === "second" ? "초" : "분"}</span>
-            <button type="button" onClick={() => setRate(rate + increment)} aria-label={`생산량 ${increment} 증가`}>＋</button>
-          </div>
-          <div className="quick-rates" aria-label="빠른 생산량 설정">
-            {[60, 360, 1800].map((value) => <button key={value} type="button" onClick={() => setQuickRate(value)}>{formatNumber(value, 0)}/분</button>)}
-          </div>
+          <button className="add-target-button" type="button" onClick={addTarget} disabled={targets.length >= TARGET_ITEMS.length}><span>＋</span> 생산 물품 추가</button>
+          <p className="target-hint"><span>↗</span> 공통 중간재는 목표 전체에서 자동 합산됩니다.</p>
           <button className="calculate-button" type="button" onClick={() => document.querySelector("#results")?.scrollIntoView({ behavior: "smooth" })}>
-            생산 라인 보기 <span>↓</span>
+            통합 생산 라인 보기 <span>↓</span>
           </button>
         </div>
       </section>
@@ -328,16 +372,19 @@ export default function Home() {
             <div className="section-heading result-heading">
               <div><p className="eyebrow">LINE SNAPSHOT</p><h2>필요 생산 라인</h2></div>
               <div className="result-actions">
-                <p><b>{target.name}</b><span>{formatNumber(ratePerMin)}/분 기준</span></p>
+                <div className="result-target-summary">
+                  <b>{targets.length}개 목표 동시 계산</b>
+                  <span>{targets.map((draft) => `${ITEM_MAP.get(draft.itemId)?.name} ${formatNumber(draft.rate)}${draft.unit === "second" ? "/초" : "/분"}`).join(" · ")}</span>
+                </div>
                 <button type="button" onClick={copySummary}>{copied ? "복사됨 ✓" : "요약 복사"}</button>
               </div>
             </div>
 
             <div className="metric-grid">
-              <article><span className="metric-index">A</span><p>총 생산 설비</p><strong>{formatNumber(result.totalRoundedMachines, 0)}<small>대</small></strong><em>정확값 {formatNumber(result.totalExactMachines)}대</em></article>
+              <article><span className="metric-index">T</span><p>통합 생산 목표</p><strong>{targets.length}<small>개</small></strong><em>각 목표 단위 개별 설정</em></article>
+              <article><span className="metric-index">A</span><p>총 생산 설비</p><strong>{formatNumber(result.totalRoundedMachines, 0)}<small>대</small></strong><em>공통 중간재 합산 후 올림</em></article>
               <article><span className="metric-index">↯</span><p>설비 기본 부하</p><strong>{formatNumber(result.totalPowerMw)}<small>MW</small></strong><em>증산제 전력 배율 제외</em></article>
               <article><span className="metric-index">R</span><p>외부 원료 종류</p><strong>{rawEntries.length}<small>종</small></strong><em>{rarePriority ? "희귀 자원 사용" : "기본 레시피 사용"}</em></article>
-              <article><span className="metric-index">B</span><p>목표 출력 벨트</p><strong>{Math.max(1, Math.ceil(ratePerMin / beltCapacity))}<small>라인</small></strong><em>{BELT_OPTIONS.find((option) => option.value === beltCapacity)?.label} 기준</em></article>
             </div>
 
             <div className="results-grid" id="resources">
@@ -382,9 +429,21 @@ export default function Home() {
                 <p><span>아이템</span><span>처리량</span><span>설비</span><span>벨트</span></p>
               </div>
               <div className="tree-body">
-                <TreeBranch key={`${targetId}-${ratePerMin}-${factoryPreset}-${productMultiplier}-${rarePriority}`} node={result.tree} depth={0} path="root" beltCapacity={beltCapacity} />
+                {result.trees.map((tree, index) => {
+                  const draft = targets[index];
+                  return (
+                    <div className="tree-target-group" key={`${draft?.id}-${tree.itemId}-${tree.ratePerMin}-${factoryPreset}-${productMultiplier}-${rarePriority}`}>
+                      <div className="tree-target-banner">
+                        <span>TARGET {String(index + 1).padStart(2, "0")}</span>
+                        <b>{tree.item.name}</b>
+                        <em>{formatNumber(draft?.rate ?? tree.ratePerMin)}{draft?.unit === "second" ? "/초" : "/분"}</em>
+                      </div>
+                      <TreeBranch node={tree} depth={0} path={`root-${index}`} beltCapacity={beltCapacity} />
+                    </div>
+                  );
+                })}
               </div>
-              <div className="tree-footnote"><span className="raw-pill">RAW</span> 외부에서 공급할 원료 · 각 행의 <b>＋</b> 버튼으로 하위 재료를 펼칠 수 있습니다.</div>
+              <div className="tree-footnote"><span className="raw-pill">RAW</span> 외부에서 공급할 원료 · 목표별 트리는 나누어 표시하고 공정·원료·설비 합계는 전체 목표를 합산합니다.</div>
             </section>
 
             <section className="process-card">
@@ -414,7 +473,7 @@ export default function Home() {
       <section className="method" id="method">
         <div><p className="eyebrow">CALCULATION NOTES</p><h2>계산 기준</h2></div>
         <div className="method-grid">
-          <article><span>01</span><h3>중간값은 그대로</h3><p>생산률과 설비 수는 계산 도중 반올림하지 않고, 실제 배치할 설비 수만 마지막에 올림합니다.</p></article>
+          <article><span>01</span><h3>공통 수요는 합산</h3><p>모든 목표에서 함께 쓰는 중간재를 먼저 합친 뒤, 실제 배치할 설비 수만 마지막에 올림합니다.</p></article>
           <article><span>02</span><h3>부산물은 별도</h3><p>정제유·그래핀 공정의 수소 부산물은 표시하되 다른 공정에 자동 재사용하지 않습니다.</p></article>
           <article><span>03</span><h3>특수 채취는 원료로</h3><p>중수소 분별, 가스 행성 채취, 반물질 생성은 속도가 조건마다 달라 외부 원료로 계산합니다.</p></article>
         </div>
