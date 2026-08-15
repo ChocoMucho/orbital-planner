@@ -8,12 +8,16 @@ const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
 export default defineConfig({
   root: desktopRoot,
   base: "./",
+  publicDir: fileURLToPath(new URL("../../public", import.meta.url)),
   envDir: repositoryRoot,
   clearScreen: false,
   plugins: [react()],
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/target/**"],
+    },
     fs: {
       allow: [repositoryRoot],
     },

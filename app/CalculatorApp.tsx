@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type SetStateAction } from "react";
 import PlanToolbar from "./components/PlanToolbar";
 import {
   calculateProductionPlan,
@@ -20,6 +20,7 @@ import {
   type Item,
 } from "./lib/dsp-data";
 import { CloudSessionProvider, useCloudSession } from "./lib/cloud-session";
+import { getDspIconPosition } from "./lib/dsp-icon-positions";
 import {
   createProductionPlanPayload,
   type FactoryPresetId,
@@ -31,10 +32,38 @@ import {
 type Unit = PlanUnit;
 type FactoryPreset = FactoryPresetId;
 type TargetDraft = PlanTargetDraft;
+type CalculatorMode = "items" | "buildings";
 
 const ITEM_MAP = new Map(ITEMS.map((item) => [item.id, item]));
-const TARGET_ITEMS = ITEMS.filter((item) => !item.raw);
+const ITEM_TARGETS = ITEMS.filter((item) => !item.raw && !item.building);
+const BUILDING_TARGETS = ITEMS.filter((item) => item.building);
 const RARE_RAW_IDS = ITEMS.filter((item) => item.rareRaw).map((item) => item.id);
+
+const PAGE_COPY: Record<CalculatorMode, {
+  eyebrow: string;
+  title: React.ReactNode;
+  description: string;
+  targetLabel: string;
+  addLabel: string;
+  searchLabel: string;
+}> = {
+  items: {
+    eyebrow: "DYSON SPHERE PROGRAM · ITEM CALCULATOR",
+    title: <>성간 공장을<br /><em>숫자로 설계하세요.</em></>,
+    description: "생산할 물품을 원하는 만큼 쌓아두세요. 서로 겹치는 중간재를 합산해 필요한 설비, 원료, 전력과 벨트 라인을 하나의 공장 계획으로 역산합니다.",
+    targetLabel: "목표 아이템",
+    addLabel: "생산 물품 추가",
+    searchLabel: "아이템 검색",
+  },
+  buildings: {
+    eyebrow: "DYSON SPHERE PROGRAM · BUILDING CALCULATOR",
+    title: <>건설 자재를<br /><em>한 번에 계산하세요.</em></>,
+    description: "벨트, 발전소, 물류 시설과 방어 건물을 선택하세요. 건물 자체의 조립 공정부터 필요한 중간재와 원료까지 하나의 생산 라인으로 역산합니다.",
+    targetLabel: "목표 건물",
+    addLabel: "생산 건물 추가",
+    searchLabel: "건물 검색",
+  },
+};
 
 const FACTORY_PRESETS: Record<FactoryPreset, { label: string; machines: Record<FacilityCategory, string> }> = {
   starter: {
@@ -82,9 +111,18 @@ function formatNumber(value: number, digits = 2) {
 }
 
 function ItemMark({ item, small = false }: { item: Item; small?: boolean }) {
+  const icon = getDspIconPosition(item.id);
   return (
-    <span className={`item-mark item-mark--${item.category}${small ? " item-mark--small" : ""}`} aria-hidden="true">
-      {item.glyph}
+    <span
+      className={`item-mark item-mark--${item.category}${icon ? " item-mark--image" : ""}${small ? " item-mark--small" : ""}`}
+      aria-hidden="true"
+    >
+      {icon ? (
+        <span
+          className="item-icon-sprite"
+          style={{ "--icon-x": `${-icon[0]}px`, "--icon-y": `${-icon[1]}px` } as React.CSSProperties}
+        />
+      ) : item.glyph}
     </span>
   );
 }
@@ -155,11 +193,17 @@ function CloudEntry() {
 }
 
 function CalculatorWorkspace() {
-  const [targets, setTargets] = useState<TargetDraft[]>([
-    { id: "target-1", itemId: "small_carrier_rocket", rate: 60, unit: "minute" },
-    { id: "target-2", itemId: "solar_sail", rate: 30, unit: "second" },
-  ]);
-  const nextTargetId = useRef(3);
+  const [mode, setMode] = useState<CalculatorMode>("items");
+  const [targetSets, setTargetSets] = useState<Record<CalculatorMode, TargetDraft[]>>({
+    items: [
+      { id: "item-target-1", itemId: "small_carrier_rocket", rate: 60, unit: "minute" },
+      { id: "item-target-2", itemId: "solar_sail", rate: 30, unit: "second" },
+    ],
+    buildings: [
+      { id: "building-target-1", itemId: "tesla_tower", rate: 60, unit: "minute" },
+    ],
+  });
+  const nextTargetId = useRef(4);
   const [pickerOpen, setPickerOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [rarePriority, setRarePriority] = useState(false);
@@ -167,6 +211,22 @@ function CalculatorWorkspace() {
   const [factoryPreset, setFactoryPreset] = useState<FactoryPreset>("standard");
   const [beltCapacity, setBeltCapacity] = useState(1800);
   const [copied, setCopied] = useState(false);
+  const targets = targetSets[mode];
+  const targetItems = mode === "items" ? ITEM_TARGETS : BUILDING_TARGETS;
+  const pageCopy = PAGE_COPY[mode];
+
+  const setTargets = (next: SetStateAction<TargetDraft[]>) => {
+    setTargetSets((current) => ({
+      ...current,
+      [mode]: typeof next === "function" ? next(current[mode]) : next,
+    }));
+  };
+
+  const changeMode = (nextMode: CalculatorMode) => {
+    setMode(nextMode);
+    setPickerOpen(null);
+    setQuery("");
+  };
 
   const planPayload = useMemo(() => createProductionPlanPayload({
     targets,
@@ -177,7 +237,12 @@ function CalculatorWorkspace() {
   }), [beltCapacity, factoryPreset, productMultiplier, rarePriority, targets]);
 
   const applySavedPlan = (payload: ProductionPlanPayload) => {
-    setTargets(payload.targets.map((target) => ({ ...target })));
+    const savedMode: CalculatorMode = ITEM_MAP.get(payload.targets[0]?.itemId ?? "")?.building ? "buildings" : "items";
+    setTargetSets((current) => ({
+      ...current,
+      [savedMode]: payload.targets.map((target) => ({ ...target })),
+    }));
+    setMode(savedMode);
     setRarePriority(payload.settings.rarePriority);
     setProductMultiplier(payload.settings.productMultiplier);
     setFactoryPreset(payload.settings.factoryPreset);
@@ -194,9 +259,9 @@ function CalculatorWorkspace() {
 
   const filteredItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return TARGET_ITEMS;
-    return TARGET_ITEMS.filter((item) => `${item.name} ${item.en}`.toLocaleLowerCase().includes(normalized));
-  }, [query]);
+    if (!normalized) return targetItems;
+    return targetItems.filter((item) => `${item.name} ${item.en}`.toLocaleLowerCase().includes(normalized));
+  }, [query, targetItems]);
 
   const calculation = useMemo<{ result?: ProductionPlanCalculationResult; error?: string }>(() => {
     try {
@@ -265,7 +330,7 @@ function CalculatorWorkspace() {
 
   const addTarget = () => {
     const selected = new Set(targets.map((target) => target.itemId));
-    const nextItem = TARGET_ITEMS.find((item) => !selected.has(item.id));
+    const nextItem = targetItems.find((item) => !selected.has(item.id));
     if (!nextItem) return;
     const id = `target-${nextTargetId.current++}`;
     setTargets((current) => [...current, { id, itemId: nextItem.id, rate: 60, unit: "minute" }]);
@@ -296,7 +361,7 @@ function CalculatorWorkspace() {
   };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell app-shell--${mode}`}>
       <header className="topbar">
         <a className="brand" href="#top" aria-label="오비탈 플래너 홈">
           <span className="brand-mark" aria-hidden="true"><i /></span>
@@ -310,16 +375,25 @@ function CalculatorWorkspace() {
         <span className="version-badge">DATA · {DATA_VERSION}</span>
       </header>
 
+      <nav className="calculator-page-tabs" aria-label="계산기 페이지">
+        <button className={mode === "items" ? "active" : ""} type="button" aria-current={mode === "items" ? "page" : undefined} onClick={() => changeMode("items")}>
+          <span>01</span><b>아이템 계산기</b><small>{ITEM_TARGETS.length} ITEMS</small>
+        </button>
+        <button className={mode === "buildings" ? "active" : ""} type="button" aria-current={mode === "buildings" ? "page" : undefined} onClick={() => changeMode("buildings")}>
+          <span>02</span><b>건물 계산기</b><small>{BUILDING_TARGETS.length} BUILDINGS</small>
+        </button>
+      </nav>
+
       <PlanToolbar payload={planPayload} onLoad={applySavedPlan} />
 
       <section className="hero" id="top">
         <div className="hero-copy-block">
-          <p className="eyebrow">DYSON SPHERE PROGRAM · PRODUCTION CALCULATOR</p>
-          <h1>성간 공장을<br /><em>숫자로 설계하세요.</em></h1>
-          <p className="hero-copy">생산할 물품을 원하는 만큼 쌓아두세요. 서로 겹치는 중간재를 합산해 필요한 설비, 원료, 전력과 벨트 라인을 하나의 공장 계획으로 역산합니다.</p>
+          <p className="eyebrow">{pageCopy.eyebrow}</p>
+          <h1>{pageCopy.title}</h1>
+          <p className="hero-copy">{pageCopy.description}</p>
           <div className="hero-facts" aria-label="계산기 기능">
             <span><b>{RECIPES.length}</b> 레시피</span>
-            <span><b>{TARGET_ITEMS.length}</b> 목표 아이템</span>
+            <span><b>{targetItems.length}</b> {pageCopy.targetLabel}</span>
             <span><b>MULTI</b> 다중 목표</span>
           </div>
         </div>
@@ -328,7 +402,7 @@ function CalculatorWorkspace() {
           <p className="panel-label"><span>01</span> 생산 목표 <i>{targets.length} OUTPUTS</i></p>
           <div className="target-list">
             {targets.map((draft, index) => {
-              const targetItem = ITEM_MAP.get(draft.itemId) ?? TARGET_ITEMS[0];
+              const targetItem = ITEM_MAP.get(draft.itemId) ?? targetItems[0];
               const entriesForTarget = filteredItems.filter((item) => item.id === draft.itemId || !targets.some((other) => other.id !== draft.id && other.itemId === item.id));
               const increment = draft.unit === "second" ? 1 : 10;
               return (
@@ -348,11 +422,11 @@ function CalculatorWorkspace() {
                         <div className="item-picker">
                           <div className="picker-search">
                             <span aria-hidden="true">⌕</span>
-                            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setPickerOpen(null)} placeholder="아이템 검색" aria-label={`${index + 1}번째 목표 아이템 검색`} />
+                            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Escape" && setPickerOpen(null)} placeholder={pageCopy.searchLabel} aria-label={`${index + 1}번째 목표 ${mode === "items" ? "아이템" : "건물"} 검색`} />
                             <small>{entriesForTarget.length}</small>
                           </div>
                           <div className="picker-list" role="listbox" aria-label={`${index + 1}번째 목표 아이템`}>
-                            {Object.entries(CATEGORY_LABELS).filter(([category]) => category !== "raw").map(([category, label]) => {
+                            {Object.entries(CATEGORY_LABELS).filter(([category]) => mode === "buildings" ? category === "building" : category !== "raw" && category !== "building").map(([category, label]) => {
                               const entries = entriesForTarget.filter((item) => item.category === category);
                               if (!entries.length) return null;
                               return (
@@ -389,7 +463,7 @@ function CalculatorWorkspace() {
               );
             })}
           </div>
-          <button className="add-target-button" type="button" onClick={addTarget} disabled={targets.length >= TARGET_ITEMS.length}><span>＋</span> 생산 물품 추가</button>
+          <button className="add-target-button" type="button" onClick={addTarget} disabled={targets.length >= targetItems.length}><span>＋</span> {pageCopy.addLabel}</button>
           <p className="target-hint"><span>↗</span> 공통 중간재는 목표 전체에서 자동 합산됩니다.</p>
           <button className="calculate-button" type="button" onClick={() => document.querySelector("#results")?.scrollIntoView({ behavior: "smooth" })}>
             통합 생산 라인 보기 <span>↓</span>

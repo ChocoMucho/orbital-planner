@@ -5,6 +5,8 @@
 ## 현재 구성
 
 - 여러 생산 물품과 각각의 분당·초당 목표량 계산
+- 아이템 계산기와 61종 건물 계산기를 별도 화면으로 제공
+- 오프라인 Windows 앱에서도 표시되는 실제 아이템·건물 이미지
 - 공통 중간재를 합산한 설비, 전력, 원자재, 부산물 계산
 - 브라우저와 Windows 앱이 공유하는 화면·계산 코드
 - Google 로그인 후 사용자별 생산 계획 저장
@@ -39,7 +41,7 @@ pnpm tauri:dev
 pnpm tauri:build
 ```
 
-NSIS 설치 파일은 `apps/desktop/src-tauri/target/release/bundle/nsis/`에 생성됩니다.
+NSIS 설치 파일은 `apps/desktop/src-tauri/target/release/bundle/nsis/`에 생성됩니다. 릴리스 앱은 Windows GUI 서브시스템으로 빌드되어 실행할 때 별도 터미널 창을 띄우지 않습니다.
 
 ## 클라우드 설정
 
@@ -49,6 +51,8 @@ NSIS 설치 파일은 `apps/desktop/src-tauri/target/release/bundle/nsis/`에 �
 
 - `app/CalculatorApp.tsx`: 웹·Windows 공용 계산기 화면
 - `app/lib/calculate.ts`: 생산량 계산 엔진
+- `app/lib/dsp-building-data.ts`: 건물·건물 보조 제작식 데이터
+- `public/dsp/icons.webp`: FactorioLab 공개 데이터 기반 로컬 아이콘 시트
 - `app/lib/cloud-session.tsx`: 로그인 세션
 - `app/lib/plan-repository.ts`: 저장·오프라인 동기화
 - `apps/desktop/`: Tauri Windows 앱 진입점

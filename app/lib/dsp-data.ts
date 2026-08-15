@@ -1,4 +1,11 @@
-export type ItemCategory = "raw" | "material" | "component" | "science" | "dyson" | "fuel";
+import {
+  BUILDING_ITEMS,
+  BUILDING_RECIPES,
+  BUILDING_SUPPORT_ITEMS,
+  BUILDING_SUPPORT_RECIPES,
+} from "./dsp-building-data.ts";
+
+export type ItemCategory = "raw" | "material" | "component" | "science" | "dyson" | "fuel" | "building";
 export type FacilityCategory = "smelter" | "assembler" | "chemical" | "refinery" | "lab" | "collider";
 
 export type Item = {
@@ -9,6 +16,7 @@ export type Item = {
   glyph: string;
   raw?: boolean;
   rareRaw?: boolean;
+  building?: boolean;
 };
 
 export type Ingredient = { itemId: string; qty: number };
@@ -112,6 +120,8 @@ export const ITEMS: Item[] = [
   { id: "universe_matrix", name: "우주 매트릭스", en: "Universe Matrix", category: "science", glyph: "W" },
 ];
 
+ITEMS.push(...BUILDING_SUPPORT_ITEMS, ...BUILDING_ITEMS);
+
 const recipe = (id: string, outputId: string, outputQty: number, timeSec: number, facility: FacilityCategory, inputs: Ingredient[], extra: Partial<Recipe> = {}): Recipe => ({
   id, outputId, outputQty, timeSec, facility, inputs, productive: true, ...extra,
 });
@@ -183,6 +193,8 @@ export const RECIPES: Recipe[] = [
   recipe("universe-matrix", "universe_matrix", 1, 15, "lab", [{ itemId: "electromagnetic_matrix", qty: 1 }, { itemId: "energy_matrix", qty: 1 }, { itemId: "structure_matrix", qty: 1 }, { itemId: "information_matrix", qty: 1 }, { itemId: "gravity_matrix", qty: 1 }, { itemId: "antimatter", qty: 1 }]),
 ];
 
+RECIPES.push(...BUILDING_SUPPORT_RECIPES, ...BUILDING_RECIPES);
+
 export const MACHINES: Machine[] = [
   { id: "arc-smelter", name: "아크 제련소", category: "smelter", speed: 1, powerMw: 0.36 },
   { id: "plane-smelter", name: "평면 제련소", category: "smelter", speed: 2, powerMw: 1.44 },
@@ -215,6 +227,7 @@ export const CATEGORY_LABELS: Record<ItemCategory, string> = {
   science: "매트릭스",
   dyson: "다이슨 스피어",
   fuel: "연료봉",
+  building: "건물",
 };
 
 export const FACILITY_LABELS: Record<FacilityCategory, string> = {

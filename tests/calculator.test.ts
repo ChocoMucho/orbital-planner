@@ -7,6 +7,10 @@ const {
   calculateProductionPlan,
   ProductionCalculationError,
 } = await import(calculatorUrl);
+const dspDataUrl = new URL("../app/lib/dsp-data.ts", import.meta.url).href;
+const iconDataUrl = new URL("../app/lib/dsp-icon-positions.ts", import.meta.url).href;
+const { DEFAULT_MACHINE_IDS, ITEMS, MACHINES, RECIPES } = await import(dspDataUrl);
+const { getDspIconPosition } = await import(iconDataUrl);
 
 const item = (id: string, raw = false) => ({
   id,
@@ -40,6 +44,40 @@ const baseMachines = [
     powerMw: 0.96,
   },
 ];
+
+test("bundles real icons and complete production chains for all building targets", () => {
+  const buildings = ITEMS.filter((entry: { building?: boolean }) => entry.building);
+  assert.equal(buildings.length, 61);
+  assert.deepEqual(ITEMS.filter((entry: { id: string }) => !getDspIconPosition(entry.id)), []);
+
+  for (const building of buildings) {
+    const result = calculateProduction({
+      items: ITEMS,
+      recipes: RECIPES,
+      machines: MACHINES,
+      target: { itemId: building.id, ratePerMin: 1 },
+      selections: { machineByCategory: DEFAULT_MACHINE_IDS },
+    });
+    assert.equal(result.tree.raw, false, `${building.id} should have a production recipe`);
+    assert.ok(result.rows.length > 0, `${building.id} should expand to at least one production row`);
+  }
+});
+
+test("calculates a Tesla Tower line through its intermediate materials", () => {
+  const result = calculateProduction({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    target: { itemId: "tesla_tower", ratePerMin: 60 },
+    selections: {
+      machineByCategory: { ...DEFAULT_MACHINE_IDS, assembler: "assembler-2" },
+    },
+  });
+
+  assert.equal(result.rows.find((row: { itemId: string }) => row.itemId === "tesla_tower")?.exactMachines, 1);
+  assert.equal(result.rawTotals.iron_ore, 180);
+  assert.equal(result.rawTotals.copper_ore, 30);
+});
 
 test("calculates recipe rates, exact machines, rounded machines and power", () => {
   const result = calculateProduction({
