@@ -76,7 +76,7 @@ h1 em::after { content: ""; position: absolute; z-index: -1; left: -1%; right: -
 .panel-label { margin: -25px -25px 25px; border-bottom: 1px solid var(--ink); padding: 15px 20px; display: flex; align-items: center; gap: 11px; font: 800 12px/1 monospace; letter-spacing: .06em; text-transform: uppercase; }
 .panel-label > span, .settings-title > span { width: 23px; height: 23px; display: grid; place-items: center; background: var(--ink); color: #fff; font: 700 10px/1 monospace; }
 .panel-label i { margin-left: auto; color: var(--muted); font: 700 9px/1 monospace; letter-spacing: .12em; }
-.target-panel > label, .rate-label-row > label, .setting-cell > label { display: block; margin: 17px 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.target-panel > label, .rate-label-row > label, .setting-cell > label, .setting-cell > span { display: block; margin: 17px 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .target-list { display: grid; gap: 9px; }
 .target-entry { position: relative; border: 1px solid var(--line); background: #f8f7f2; }
 .target-entry:focus-within { border-color: var(--ink); }
@@ -156,7 +156,7 @@ h1 em::after { content: ""; position: absolute; z-index: -1; left: -1%; right: -
 .settings-title b, .settings-title small { display: block; }
 .settings-title b { font-size: 13px; }
 .settings-title small { margin-top: 5px; color: #92958f; font: 700 9px/1 monospace; letter-spacing: .1em; }
-.setting-cell > label { margin: 0 0 9px; color: #9ca09a; }
+.setting-cell > label, .setting-cell > span { margin: 0 0 9px; color: #9ca09a; }
 .setting-cell select { width: 100%; border: 1px solid #565a55; border-radius: 0; background: #1d211e; color: #fff; padding: 10px 30px 10px 10px; font-size: 11px; cursor: pointer; }
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #565a55; }
 .segmented button { border: 0; background: #1d211e; color: #aeb1ac; padding: 10px 5px; font-size: 10px; cursor: pointer; }
@@ -331,7 +331,7 @@ footer > a:last-child { justify-self: end; color: #a5aaa3; font-size: 10px; text
 }
 
 @media print {
-  .topbar nav, .calculate-button, .result-actions button, .settings-band, .quick-rates, .method, footer { display: none !important; }
+  .topbar nav, .plan-toolbar, .calculate-button, .result-actions button, .settings-band, .quick-rates, .method, footer { display: none !important; }
   .hero { padding: 30px; display: block; }
   .target-panel { margin-top: 25px; box-shadow: none; }
   .results { padding: 30px; }
@@ -340,4 +340,98 @@ footer > a:last-child { justify-self: end; color: #a5aaa3; font-size: 10px; text
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+
+.cloud-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(190, 255, 79, .13), transparent 34%),
+    #071119;
+  color: #f5f4e9;
+}
+
+.cloud-gate-card {
+  width: min(560px, 100%);
+  padding: clamp(32px, 7vw, 68px);
+  border: 1px solid rgba(255, 255, 255, .34);
+  box-shadow: 12px 12px 0 #befe4f;
+  background: #0c181f;
+}
+
+.cloud-gate-card .brand-mark { margin-bottom: 42px; border-color: #befe4f; }
+.cloud-gate-card .brand-mark::after { border-color: #befe4f; }
+.cloud-gate-card h1 { margin: 10px 0 20px; font-size: clamp(38px, 7vw, 68px); line-height: .95; }
+.cloud-gate-card > p:not(.eyebrow) { color: #aeb9b1; line-height: 1.7; }
+.cloud-gate-card button {
+  width: 100%;
+  margin-top: 28px;
+  min-height: 52px;
+  border: 1px solid #befe4f;
+  background: #befe4f;
+  color: #071119;
+  font: 800 13px monospace;
+  cursor: pointer;
+}
+.cloud-gate-card small { display: block; margin-top: 16px; color: #ff9a86; line-height: 1.5; }
+
+.plan-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, .8fr) minmax(360px, 1.7fr) minmax(250px, 1fr);
+  gap: 24px;
+  align-items: end;
+  padding: 18px clamp(24px, 6vw, 88px);
+  border-bottom: 1px solid #344149;
+  background: #0c181f;
+  color: #f5f4e9;
+}
+
+.plan-toolbar--setup { grid-template-columns: 1fr; align-items: center; }
+.plan-toolbar--setup > div { display: grid; grid-template-columns: auto auto 1fr; gap: 14px; align-items: baseline; }
+.plan-toolbar--setup small { color: #91a09a; }
+.plan-toolbar-label { color: #befe4f; font: 800 9px monospace; letter-spacing: .13em; }
+.plan-toolbar-account { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.plan-toolbar-account .plan-toolbar-label { grid-column: 1 / -1; }
+.plan-toolbar-account b { overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.plan-toolbar button {
+  min-height: 38px;
+  border: 1px solid #55636a;
+  background: transparent;
+  color: inherit;
+  padding: 0 14px;
+  font: 700 10px monospace;
+  cursor: pointer;
+}
+.plan-toolbar button:disabled { opacity: .42; cursor: not-allowed; }
+.plan-toolbar-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.plan-toolbar label { display: grid; gap: 6px; }
+.plan-toolbar label > span { color: #91a09a; font: 700 9px monospace; }
+.plan-toolbar input,
+.plan-toolbar select {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #55636a;
+  border-radius: 0;
+  background: #071119;
+  color: #f5f4e9;
+  padding: 0 11px;
+  font: 600 11px sans-serif;
+}
+.plan-toolbar-actions { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; }
+.plan-toolbar-actions > span { color: #91a09a; font: 700 9px monospace; text-align: right; }
+.plan-toolbar .plan-save-button { border-color: #befe4f; background: #befe4f; color: #071119; }
+
+@media (max-width: 1040px) {
+  .plan-toolbar { grid-template-columns: 1fr 2fr; }
+  .plan-toolbar-actions { grid-column: 1 / -1; }
+}
+
+@media (max-width: 680px) {
+  .plan-toolbar { grid-template-columns: 1fr; padding-inline: 20px; }
+  .plan-toolbar-fields { grid-template-columns: 1fr; }
+  .plan-toolbar-actions { grid-column: auto; grid-template-columns: 1fr 1fr; }
+  .plan-toolbar-actions > span { grid-column: 1 / -1; text-align: left; }
+  .plan-toolbar--setup > div { grid-template-columns: 1fr; gap: 6px; }
 }

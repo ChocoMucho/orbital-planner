@@ -1,0 +1,18 @@
+html[data-runtime="desktop"] {
+  background: #071119;
+}
+
+html[data-runtime="desktop"] body {
+  min-width: 980px;
+  overscroll-behavior: none;
+}
+
+html[data-runtime="desktop"] .topbar {
+  -webkit-app-region: drag;
+}
+
+html[data-runtime="desktop"] .topbar a,
+html[data-runtime="desktop"] .topbar button,
+html[data-runtime="desktop"] .topbar nav {
+  -webkit-app-region: no-drag;
+}

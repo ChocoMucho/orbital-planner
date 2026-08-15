@@ -2,6 +2,7 @@
   "name": "orbital-planner-dsp",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.19.0",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -9,11 +10,21 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --experimental-strip-types --test tests/calculator.test.ts && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "desktop:dev": "vite --config apps/desktop/vite.config.ts",
+    "desktop:build": "vite build --config apps/desktop/vite.config.ts",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev --config apps/desktop/src-tauri/tauri.conf.json",
+    "tauri:build": "tauri build --config apps/desktop/src-tauri/tauri.conf.json",
+    "test": "pnpm run build && node --experimental-strip-types --test tests/calculator.test.ts tests/plan-model.test.ts tests/plan-repository.test.ts && node --test tests/rendered-html.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-deep-link": "^2.4.9",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "drizzle-orm": "0.45.2",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -24,6 +35,7 @@
     "@next/eslint-plugin-next": "16.2.6",
     "@openai/sites-vite-plugin": "0.1.0",
     "@tailwindcss/postcss": "4.2.1",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
