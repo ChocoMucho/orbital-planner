@@ -9,8 +9,10 @@ const {
 } = await import(calculatorUrl);
 const dspDataUrl = new URL("../app/lib/dsp-data.ts", import.meta.url).href;
 const iconDataUrl = new URL("../app/lib/dsp-icon-positions.ts", import.meta.url).href;
+const flowGraphUrl = new URL("../app/lib/production-flow-graph.ts", import.meta.url).href;
 const { DEFAULT_MACHINE_IDS, ITEMS, MACHINES, RECIPES } = await import(dspDataUrl);
 const { getDspIconPosition } = await import(iconDataUrl);
+const { buildProductionFlowGraph, layoutProductionFlowGraph } = await import(flowGraphUrl);
 
 const item = (id: string, raw = false) => ({
   id,
@@ -115,6 +117,48 @@ test("calculates recipe rates, exact machines, rounded machines and power", () =
   assert.equal(plate?.exactMachines, 1.5);
   assert.equal(plate?.roundedMachines, 2);
   assert.equal(result.tree.children[0]?.children[0]?.raw, true);
+  assert.equal(result.tree.machine?.name, "Assembler Mk.I");
+});
+
+test("builds a facility-to-item production network for magnetic coils", () => {
+  const result = calculateProductionPlan({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    targets: [{ itemId: "magnetic_coil", ratePerMin: 60 }],
+    selections: {
+      machineByCategory: {
+        ...DEFAULT_MACHINE_IDS,
+        smelter: "plane-smelter",
+        assembler: "assembler-3",
+      },
+    },
+  });
+
+  const graph = buildProductionFlowGraph(result);
+  const processNodes = graph.nodes.filter((node: { kind: string }) => node.kind === "process");
+  const rawNodes = graph.nodes.filter((node: { kind: string }) => node.kind === "raw");
+  const targetNodes = graph.nodes.filter((node: { kind: string }) => node.kind === "target");
+  assert.equal(processNodes.length, 3);
+  assert.equal(rawNodes.length, 2);
+  assert.equal(targetNodes.length, 1);
+  assert.equal(graph.edges.length, 5);
+
+  const coil = processNodes.find((node: { item: { id: string } }) => node.item.id === "magnetic_coil");
+  const magnet = processNodes.find((node: { item: { id: string } }) => node.item.id === "magnet");
+  const copper = processNodes.find((node: { item: { id: string } }) => node.item.id === "copper_ingot");
+  assert.equal(coil?.machine.name, "조립기 Mk.III");
+  assert.equal(coil?.roundedMachines, 1);
+  assert.equal(coil?.capacityPerMachinePerMin, 180);
+  assert.equal(magnet?.roundedMachines, 1);
+  assert.equal(magnet?.capacityPerMachinePerMin, 80);
+  assert.equal(copper?.roundedMachines, 1);
+  assert.equal(copper?.capacityPerMachinePerMin, 120);
+
+  const layout = layoutProductionFlowGraph(graph);
+  const target = layout.nodes.find((node: { kind: string }) => node.kind === "target");
+  assert.ok(layout.nodes.every((node: { x: number; y: number }) => Number.isFinite(node.x) && Number.isFinite(node.y)));
+  assert.ok(target && target.x > Math.min(...rawNodes.map((node: { id: string }) => layout.nodes.find((entry: { id: string }) => entry.id === node.id)?.x ?? Infinity)));
 });
 
 test("aggregates a shared intermediate before rounding", () => {
@@ -175,6 +219,7 @@ test("aggregates a shared intermediate before rounding", () => {
   assert.equal(sharedRows[0]?.exactMachines, 0.8);
   assert.equal(sharedRows[0]?.roundedMachines, 1);
   assert.deepEqual(result.rawTotals, { ore: 48 });
+
 });
 
 test("combines unrelated production targets into one plan", () => {
@@ -271,6 +316,14 @@ test("aggregates shared intermediates across targets before rounding", () => {
   assert.equal(sharedRows[0]?.exactMachines, 0.8);
   assert.equal(sharedRows[0]?.roundedMachines, 1);
   assert.deepEqual(result.rawTotals, { ore: 48 });
+
+  const graph = buildProductionFlowGraph(result);
+  const sharedNodes = graph.nodes.filter((node: { kind: string; item: { id: string } }) => node.kind === "process" && node.item.id === "shared");
+  assert.equal(sharedNodes.length, 1);
+  assert.equal(sharedNodes[0]?.ratePerMin, 48);
+  assert.equal(sharedNodes[0]?.roundedMachines, 1);
+  assert.equal(graph.targetNodeIds.length, 2);
+  assert.equal(graph.edges.filter((edge: { item: { id: string } }) => edge.item.id === "shared").length, 2);
 });
 
 test("preserves duplicate target roots while aggregating their demand", () => {

@@ -121,6 +121,7 @@ export interface ProductionTreeNode {
   craftsPerMin?: number;
   productMultiplier?: number;
   machineId?: string;
+  machine?: Machine;
   exactMachines?: number;
   roundedMachines?: number;
   exactPowerMw?: number;
@@ -570,6 +571,7 @@ export function calculateProductionPlan(
       craftsPerMin,
       productMultiplier,
       machineId: machine.id,
+      machine,
       exactMachines,
       roundedMachines,
       exactPowerMw: exactMachines * machine.powerMw,

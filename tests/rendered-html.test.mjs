@@ -28,10 +28,13 @@ test("server-renders the DSP production calculator", async () => {
   assert.match(html, /생산 물품 추가/);
   assert.match(html, /아이템 계산기/);
   assert.match(html, /건물 계산기/);
+  assert.match(html, /읽기 설정 열기/);
   assert.match(html, /61(?:<!-- -->)? BUILDINGS/);
   assert.match(html, /item-icon-sprite/);
   assert.match(html, /2(?:<!-- -->)? OUTPUTS/);
   assert.match(html, /필요 생산 라인/);
+  assert.match(html, /설비 \/ 1대 생산량/);
+  assert.match(html, /네트워크/);
   assert.match(html, /og\.png/);
   assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
 });

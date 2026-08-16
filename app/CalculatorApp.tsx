@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import PlanToolbar from "./components/PlanToolbar";
 import {
   calculateProductionPlan,
@@ -21,6 +21,7 @@ import {
 } from "./lib/dsp-data";
 import { CloudSessionProvider, useCloudSession } from "./lib/cloud-session";
 import { getDspIconPosition } from "./lib/dsp-icon-positions";
+import { buildProductionFlowGraph, layoutProductionFlowGraph, type ProductionFlowNode } from "./lib/production-flow-graph";
 import {
   createProductionPlanPayload,
   type FactoryPresetId,
@@ -33,6 +34,28 @@ type Unit = PlanUnit;
 type FactoryPreset = FactoryPresetId;
 type TargetDraft = PlanTargetDraft;
 type CalculatorMode = "items" | "buildings";
+type ProductionView = "list" | "network";
+type TextSizePreference = "standard" | "comfortable" | "large";
+
+const TEXT_SIZE_STORAGE_KEY = "orbital-planner:text-size";
+
+const TEXT_SIZE_OPTIONS: { id: TextSizePreference; label: string; scale: string; description: string }[] = [
+  { id: "standard", label: "기본", scale: "100%", description: "한 화면에 정보를 많이 표시" },
+  { id: "comfortable", label: "편안하게", scale: "115%", description: "작은 안내 글씨를 읽기 쉽게" },
+  { id: "large", label: "크게", scale: "130%", description: "세부 정보까지 가장 크게 표시" },
+];
+
+function getStoredTextSize(): TextSizePreference {
+  if (typeof window === "undefined") return "comfortable";
+  try {
+    const saved = window.localStorage.getItem(TEXT_SIZE_STORAGE_KEY);
+    return TEXT_SIZE_OPTIONS.some((option) => option.id === saved)
+      ? saved as TextSizePreference
+      : "comfortable";
+  } catch {
+    return "comfortable";
+  }
+}
 
 const ITEM_MAP = new Map(ITEMS.map((item) => [item.id, item]));
 const ITEM_TARGETS = ITEMS.filter((item) => !item.raw && !item.building);
@@ -127,10 +150,13 @@ function ItemMark({ item, small = false }: { item: Item; small?: boolean }) {
   );
 }
 
-function TreeBranch({ node, depth, path, beltCapacity }: { node: ProductionTreeNode; depth: number; path: string; beltCapacity: number }) {
+function TreeBranch({ node, depth, path, beltCapacity, unit }: { node: ProductionTreeNode; depth: number; path: string; beltCapacity: number; unit: Unit }) {
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = node.children.length > 0;
   const beltLanes = Math.max(1, Math.ceil(node.ratePerMin / beltCapacity));
+  const capacityPerMachine = node.exactMachines && node.exactMachines > 0
+    ? node.ratePerMin / node.exactMachines
+    : 0;
 
   return (
     <div className="tree-branch">
@@ -144,16 +170,23 @@ function TreeBranch({ node, depth, path, beltCapacity }: { node: ProductionTreeN
           <ItemMark item={node.item as Item} small />
           <span><b>{node.item.name}</b><small>{node.item.en}</small></span>
         </div>
-        <div className="tree-rate"><b>{formatNumber(node.ratePerMin)}</b><small>/분</small></div>
+        <div className="tree-rate"><b>{formatRate(node.ratePerMin, unit)}</b><small>공정 전체</small></div>
         <div className="tree-machine">
-          {node.raw ? <span className="raw-pill">RAW</span> : <><b>{formatNumber(node.roundedMachines ?? 0, 0)}대</b><small>정확 {formatNumber(node.exactMachines ?? 0)}</small></>}
+          {node.raw ? (
+            <><b>외부 공급</b><small>설비 없음</small></>
+          ) : (
+            <>
+              <b>{node.machine?.name ?? "생산 설비"} · {formatNumber(node.roundedMachines ?? 0, 0)}대</b>
+              <small>정확 {formatNumber(node.exactMachines ?? 0)}대 · 1대 최대 {formatRate(capacityPerMachine, unit)}</small>
+            </>
+          )}
         </div>
         <div className="tree-belt"><b>{beltLanes}</b><small>라인</small></div>
       </div>
       {hasChildren && expanded && (
         <div className="tree-children">
           {node.children.map((child, index) => (
-            <TreeBranch key={`${path}-${child.itemId}-${index}`} node={child} depth={depth + 1} path={`${path}-${index}`} beltCapacity={beltCapacity} />
+            <TreeBranch key={`${path}-${child.itemId}-${index}`} node={child} depth={depth + 1} path={`${path}-${index}`} beltCapacity={beltCapacity} unit={unit} />
           ))}
         </div>
       )}
@@ -161,15 +194,161 @@ function TreeBranch({ node, depth, path, beltCapacity }: { node: ProductionTreeN
   );
 }
 
+function flowNodeDescription(node: ProductionFlowNode) {
+  if (node.kind === "raw") return `${node.item.name} 외부 원료`;
+  if (node.kind === "target") return `${node.item.name} 생산 목표`;
+  return `${node.machine.name} ${node.roundedMachines}대의 ${node.item.name} 공정`;
+}
+
+function ProductionNetwork({ result, targetDrafts }: { result: ProductionPlanCalculationResult; targetDrafts: TargetDraft[] }) {
+  const [unit, setUnit] = useState<Unit>(targetDrafts[0]?.unit ?? "minute");
+  const [zoom, setZoom] = useState(1);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const layout = useMemo(
+    () => layoutProductionFlowGraph(buildProductionFlowGraph(result)),
+    [result],
+  );
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollLeft = viewport.scrollWidth;
+    viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2);
+  }, [layout.height, layout.width, zoom]);
+
+  const renderRate = (ratePerMin: number) => formatRate(ratePerMin, unit);
+  const markerId = "production-network-arrow";
+
+  return (
+    <div className="production-network">
+      <div className="network-toolbar">
+        <div>
+          <b>통합 생산 네트워크</b>
+          <small>원료 → 품목별 생산 설비 → 목표</small>
+        </div>
+        <div className="network-toolbar-controls">
+          <div className="network-unit-tabs" role="group" aria-label="네트워크 생산량 단위">
+            <button type="button" className={unit === "minute" ? "active" : ""} onClick={() => setUnit("minute")}>/분</button>
+            <button type="button" className={unit === "second" ? "active" : ""} onClick={() => setUnit("second")}>/초</button>
+          </div>
+          <div className="network-zoom" role="group" aria-label="네트워크 확대 배율">
+            <button type="button" onClick={() => setZoom((value) => Math.max(.7, Number((value - .1).toFixed(1))))} aria-label="네트워크 축소">−</button>
+            <span>{Math.round(zoom * 100)}%</span>
+            <button type="button" onClick={() => setZoom((value) => Math.min(1.3, Number((value + .1).toFixed(1))))} aria-label="네트워크 확대">＋</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="network-legend" aria-label="네트워크 범례">
+        <span><i className="legend-raw" />외부 원료</span>
+        <span><i className="legend-process" />생산 설비</span>
+        <span><i className="legend-target" />생산 목표</span>
+        <em>가로·세로로 스크롤할 수 있습니다.</em>
+      </div>
+
+      <div className="network-viewport" ref={viewportRef} role="region" aria-label="통합 생산 네트워크 지도">
+        <div className="network-scale-frame" style={{ width: layout.width * zoom, height: layout.height * zoom }}>
+          <div className="network-canvas" style={{ width: layout.width, height: layout.height, transform: `scale(${zoom})` }}>
+            <svg className="network-connectors" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
+              <defs>
+                <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M 0 0 L 8 4 L 0 8 z" />
+                </marker>
+              </defs>
+              {layout.edges.map((edge) => {
+                const x1 = edge.source.x + layout.nodeWidth;
+                const y1 = edge.source.y + layout.nodeHeight / 2;
+                const x2 = edge.target.x;
+                const y2 = edge.target.y + layout.nodeHeight / 2;
+                const bend = Math.max(54, (x2 - x1) * .42);
+                return <path key={edge.id} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} markerEnd={`url(#${markerId})`} />;
+              })}
+            </svg>
+
+            {layout.edges.map((edge) => {
+              const x1 = edge.source.x + layout.nodeWidth;
+              const y1 = edge.source.y + layout.nodeHeight / 2;
+              const x2 = edge.target.x;
+              const y2 = edge.target.y + layout.nodeHeight / 2;
+              return (
+                <span className="network-edge-label" key={`label-${edge.id}`} style={{ left: (x1 + x2) / 2, top: (y1 + y2) / 2 }}>
+                  <b>{edge.item.name}</b><small>{renderRate(edge.ratePerMin)}</small>
+                </span>
+              );
+            })}
+
+            {layout.nodes.map((node) => {
+              const targetDraft = node.kind === "target" ? targetDrafts[node.targetIndex] : undefined;
+              return (
+                <article className={`network-node network-node--${node.kind}`} key={node.id} style={{ left: node.x, top: node.y, width: layout.nodeWidth, height: layout.nodeHeight }}>
+                  {node.kind === "process" && (
+                    <>
+                      <div className="network-node-kicker"><span>{FACILITY_LABELS[node.machine.category]}</span><em>가동 {formatNumber(node.utilization * 100, 1)}%</em></div>
+                      <strong>{node.machine.name} · {formatNumber(node.roundedMachines, 0)}대</strong>
+                      <div className="network-node-item"><ItemMark item={node.item as Item} small /><span><b>{node.item.name}</b><small>라인 {renderRate(node.ratePerMin)}</small></span></div>
+                      <p>정확 {formatNumber(node.exactMachines)}대 · 1대 최대 {renderRate(node.capacityPerMachinePerMin)}</p>
+                    </>
+                  )}
+                  {node.kind === "raw" && (
+                    <>
+                      <div className="network-node-kicker"><span>RAW</span><em>외부 공급</em></div>
+                      <div className="network-node-item"><ItemMark item={node.item as Item} small /><span><b>{node.item.name}</b><small>필요 {renderRate(node.ratePerMin)}</small></span></div>
+                      <p>채굴·채취 라인은 별도 산정</p>
+                    </>
+                  )}
+                  {node.kind === "target" && (
+                    <>
+                      <div className="network-node-kicker"><span>TARGET {String(node.targetIndex + 1).padStart(2, "0")}</span><em>생산 목표</em></div>
+                      <div className="network-node-item"><ItemMark item={node.item as Item} small /><span><b>{node.item.name}</b><small>{targetDraft ? `${formatNumber(targetDraft.rate)}${targetDraft.unit === "second" ? "/초" : "/분"}` : renderRate(node.ratePerMin)}</small></span></div>
+                      <p>설정한 최종 생산량</p>
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <ul className="sr-only">
+        {layout.edges.map((edge) => (
+          <li key={`accessible-${edge.id}`}>{flowNodeDescription(edge.source)}에서 {edge.item.name} {renderRate(edge.ratePerMin)}를 {flowNodeDescription(edge.target)}에 공급합니다.</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function CalculatorApp() {
+  const [textSize, setTextSize] = useState<TextSizePreference>(getStoredTextSize);
+
+  useEffect(() => {
+    document.documentElement.dataset.uiTextSize = textSize;
+  }, [textSize]);
+
+  const changeTextSize = (next: TextSizePreference) => {
+    setTextSize(next);
+    document.documentElement.dataset.uiTextSize = next;
+    try {
+      window.localStorage.setItem(TEXT_SIZE_STORAGE_KEY, next);
+    } catch {
+      // 저장소 접근이 막힌 환경에서도 현재 실행 중에는 설정을 유지합니다.
+    }
+  };
+
   return (
     <CloudSessionProvider>
-      <CloudEntry />
+      <CloudEntry textSize={textSize} onTextSizeChange={changeTextSize} />
     </CloudSessionProvider>
   );
 }
 
-function CloudEntry() {
+function formatRate(ratePerMin: number, unit: Unit) {
+  const value = unit === "second" ? ratePerMin / 60 : ratePerMin;
+  return `${formatNumber(value, Math.abs(value) < 0.1 ? 4 : 2)}${unit === "second" ? "/초" : "/분"}`;
+}
+
+function CloudEntry({ textSize, onTextSizeChange }: { textSize: TextSizePreference; onTextSizeChange: (next: TextSizePreference) => void }) {
   const cloud = useCloudSession();
 
   if (cloud.configured && (cloud.loading || !cloud.user)) {
@@ -189,10 +368,10 @@ function CloudEntry() {
     );
   }
 
-  return <CalculatorWorkspace />;
+  return <CalculatorWorkspace textSize={textSize} onTextSizeChange={onTextSizeChange} />;
 }
 
-function CalculatorWorkspace() {
+function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSizePreference; onTextSizeChange: (next: TextSizePreference) => void }) {
   const [mode, setMode] = useState<CalculatorMode>("items");
   const [targetSets, setTargetSets] = useState<Record<CalculatorMode, TargetDraft[]>>({
     items: [
@@ -211,9 +390,20 @@ function CalculatorWorkspace() {
   const [factoryPreset, setFactoryPreset] = useState<FactoryPreset>("standard");
   const [beltCapacity, setBeltCapacity] = useState(1800);
   const [copied, setCopied] = useState(false);
+  const [productionView, setProductionView] = useState<ProductionView>("list");
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const targets = targetSets[mode];
   const targetItems = mode === "items" ? ITEM_TARGETS : BUILDING_TARGETS;
   const pageCopy = PAGE_COPY[mode];
+
+  useEffect(() => {
+    if (!preferencesOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreferencesOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [preferencesOpen]);
 
   const setTargets = (next: SetStateAction<TargetDraft[]>) => {
     setTargetSets((current) => ({
@@ -372,7 +562,12 @@ function CalculatorWorkspace() {
           <a href="#production-tree">생산 트리</a>
           <a href="#method">계산 기준</a>
         </nav>
-        <span className="version-badge">DATA · {DATA_VERSION}</span>
+        <div className="topbar-actions">
+          <span className="version-badge">DATA · {DATA_VERSION}</span>
+          <button className="preferences-button" type="button" onClick={() => setPreferencesOpen(true)} aria-haspopup="dialog" aria-label="읽기 설정 열기">
+            <span aria-hidden="true">Aa</span> 설정
+          </button>
+        </div>
       </header>
 
       <nav className="calculator-page-tabs" aria-label="계산기 페이지">
@@ -558,27 +753,37 @@ function CalculatorWorkspace() {
               </section>
             </div>
 
-            <section className="tree-card" id="production-tree">
+            <section className={`tree-card tree-card--${productionView}`} id="production-tree">
               <div className="card-heading tree-heading">
-                <div><p className="eyebrow">DEPENDENCY TREE</p><h3>생산 트리</h3></div>
-                <p><span>아이템</span><span>처리량</span><span>설비</span><span>벨트</span></p>
+                <div><p className="eyebrow">PRODUCTION MAP</p><h3>{productionView === "list" ? "생산 트리" : "생산 네트워크"}</h3></div>
+                <div className="tree-view-tabs" role="group" aria-label="생산 흐름 표시 방식">
+                  <button type="button" className={productionView === "list" ? "active" : ""} aria-pressed={productionView === "list"} onClick={() => setProductionView("list")}>목록</button>
+                  <button type="button" className={productionView === "network" ? "active" : ""} aria-pressed={productionView === "network"} onClick={() => setProductionView("network")}>네트워크</button>
+                </div>
               </div>
-              <div className="tree-body">
-                {result.trees.map((tree, index) => {
-                  const draft = targets[index];
-                  return (
-                    <div className="tree-target-group" key={`${draft?.id}-${tree.itemId}-${tree.ratePerMin}-${factoryPreset}-${productMultiplier}-${rarePriority}`}>
-                      <div className="tree-target-banner">
-                        <span>TARGET {String(index + 1).padStart(2, "0")}</span>
-                        <b>{tree.item.name}</b>
-                        <em>{formatNumber(draft?.rate ?? tree.ratePerMin)}{draft?.unit === "second" ? "/초" : "/분"}</em>
-                      </div>
-                      <TreeBranch node={tree} depth={0} path={`root-${index}`} beltCapacity={beltCapacity} />
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="tree-footnote"><span className="raw-pill">RAW</span> 외부에서 공급할 원료 · 목표별 트리는 나누어 표시하고 공정·원료·설비 합계는 전체 목표를 합산합니다.</div>
+              {productionView === "list" ? (
+                <>
+                  <div className="tree-columns" aria-hidden="true"><span>아이템</span><span>처리량</span><span>설비 / 1대 생산량</span><span>벨트</span></div>
+                  <div className="tree-body">
+                    {result.trees.map((tree, index) => {
+                      const draft = targets[index];
+                      return (
+                        <div className="tree-target-group" key={`${draft?.id}-${tree.itemId}-${tree.ratePerMin}-${factoryPreset}-${productMultiplier}-${rarePriority}`}>
+                          <div className="tree-target-banner">
+                            <span>TARGET {String(index + 1).padStart(2, "0")}</span>
+                            <b>{tree.item.name}</b>
+                            <em>{formatNumber(draft?.rate ?? tree.ratePerMin)}{draft?.unit === "second" ? "/초" : "/분"}</em>
+                          </div>
+                          <TreeBranch node={tree} depth={0} path={`root-${index}`} beltCapacity={beltCapacity} unit={draft?.unit ?? "minute"} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="tree-footnote"><span className="raw-pill">RAW</span> 외부에서 공급할 원료 · 목표별 트리는 나누어 표시하고 공정·원료·설비 합계는 전체 목표를 합산합니다.</div>
+                </>
+              ) : (
+                <ProductionNetwork key={`${mode}-${targets.map((target) => target.unit).join("-")}`} result={result} targetDrafts={targets} />
+              )}
             </section>
 
             <section className="process-card">
@@ -619,6 +824,40 @@ function CalculatorWorkspace() {
         <p>Dyson Sphere Program 비공식 생산 계산기 · 데이터 {DATA_VERSION}</p>
         <a href="#top">맨 위로 ↑</a>
       </footer>
+
+      {preferencesOpen && (
+        <div className="preferences-layer">
+          <button className="preferences-backdrop" type="button" onClick={() => setPreferencesOpen(false)} aria-label="설정 닫기" />
+          <section className="preferences-dialog" role="dialog" aria-modal="true" aria-labelledby="preferences-title">
+            <div className="preferences-dialog-head">
+              <div>
+                <p className="eyebrow">APPLICATION SETTINGS</p>
+                <h2 id="preferences-title">읽기 설정</h2>
+              </div>
+              <button type="button" onClick={() => setPreferencesOpen(false)} aria-label="설정 닫기">×</button>
+            </div>
+            <fieldset>
+              <legend>글자 크기</legend>
+              <div className="text-size-options">
+                {TEXT_SIZE_OPTIONS.map((option) => (
+                  <button
+                    className={textSize === option.id ? "active" : ""}
+                    type="button"
+                    key={option.id}
+                    onClick={() => onTextSizeChange(option.id)}
+                    aria-pressed={textSize === option.id}
+                  >
+                    <span className="text-size-sample" aria-hidden="true">Aa</span>
+                    <strong>{option.label}<em>{option.scale}</em></strong>
+                    <small>{option.description}</small>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <p className="preferences-note">선택한 크기는 이 기기에 자동 저장됩니다.</p>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
