@@ -3,7 +3,7 @@ html[data-runtime="desktop"] {
 }
 
 html[data-runtime="desktop"] body {
-  min-width: 980px;
+  min-width: 0;
   overscroll-behavior: none;
 }
 

@@ -16,7 +16,7 @@
         "title": "오비탈 플래너",
         "width": 1440,
         "height": 920,
-        "minWidth": 1000,
+        "minWidth": 820,
         "minHeight": 720,
         "resizable": true,
         "fullscreen": false
