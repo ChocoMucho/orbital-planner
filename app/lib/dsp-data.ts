@@ -4,9 +4,10 @@ import {
   BUILDING_SUPPORT_ITEMS,
   BUILDING_SUPPORT_RECIPES,
 } from "./dsp-building-data.ts";
+import { EXPANDED_ITEMS, EXPANDED_RECIPES } from "./dsp-item-expansion-data.ts";
 
-export type ItemCategory = "raw" | "material" | "component" | "science" | "dyson" | "fuel" | "building";
-export type FacilityCategory = "smelter" | "assembler" | "chemical" | "refinery" | "lab" | "collider";
+export type ItemCategory = "raw" | "material" | "component" | "science" | "dyson" | "fuel" | "logistics" | "combat" | "building";
+export type FacilityCategory = "smelter" | "assembler" | "chemical" | "refinery" | "lab" | "collider" | "ray_receiver";
 
 export type Item = {
   id: string;
@@ -120,7 +121,7 @@ export const ITEMS: Item[] = [
   { id: "universe_matrix", name: "우주 매트릭스", en: "Universe Matrix", category: "science", glyph: "W" },
 ];
 
-ITEMS.push(...BUILDING_SUPPORT_ITEMS, ...BUILDING_ITEMS);
+ITEMS.push(...EXPANDED_ITEMS, ...BUILDING_SUPPORT_ITEMS, ...BUILDING_ITEMS);
 
 const recipe = (id: string, outputId: string, outputQty: number, timeSec: number, facility: FacilityCategory, inputs: Ingredient[], extra: Partial<Recipe> = {}): Recipe => ({
   id, outputId, outputQty, timeSec, facility, inputs, productive: true, ...extra,
@@ -193,7 +194,7 @@ export const RECIPES: Recipe[] = [
   recipe("universe-matrix", "universe_matrix", 1, 15, "lab", [{ itemId: "electromagnetic_matrix", qty: 1 }, { itemId: "energy_matrix", qty: 1 }, { itemId: "structure_matrix", qty: 1 }, { itemId: "information_matrix", qty: 1 }, { itemId: "gravity_matrix", qty: 1 }, { itemId: "antimatter", qty: 1 }]),
 ];
 
-RECIPES.push(...BUILDING_SUPPORT_RECIPES, ...BUILDING_RECIPES);
+RECIPES.push(...EXPANDED_RECIPES, ...BUILDING_SUPPORT_RECIPES, ...BUILDING_RECIPES);
 
 export const MACHINES: Machine[] = [
   { id: "arc-smelter", name: "아크 제련소", category: "smelter", speed: 1, powerMw: 0.36 },
@@ -209,6 +210,7 @@ export const MACHINES: Machine[] = [
   { id: "matrix-lab", name: "매트릭스 연구소", category: "lab", speed: 1, powerMw: 0.48 },
   { id: "self-evolution-lab", name: "자기 진화 연구소", category: "lab", speed: 3, powerMw: 1.92 },
   { id: "particle-collider", name: "미니 입자 충돌기", category: "collider", speed: 1, powerMw: 12 },
+  { id: "ray-receiver", name: "광선 수신기 (연속 수신 100%)", category: "ray_receiver", speed: 1, powerMw: 0 },
 ];
 
 export const DEFAULT_MACHINE_IDS: Record<FacilityCategory, string> = {
@@ -218,6 +220,7 @@ export const DEFAULT_MACHINE_IDS: Record<FacilityCategory, string> = {
   refinery: "oil-refinery",
   lab: "matrix-lab",
   collider: "particle-collider",
+  ray_receiver: "ray-receiver",
 };
 
 export const CATEGORY_LABELS: Record<ItemCategory, string> = {
@@ -227,6 +230,8 @@ export const CATEGORY_LABELS: Record<ItemCategory, string> = {
   science: "매트릭스",
   dyson: "다이슨 스피어",
   fuel: "연료봉",
+  logistics: "물류 · 지원",
+  combat: "전투 · 탄약",
   building: "건물",
 };
 
@@ -237,4 +242,5 @@ export const FACILITY_LABELS: Record<FacilityCategory, string> = {
   refinery: "정유",
   lab: "연구소",
   collider: "입자 충돌",
+  ray_receiver: "광선 수신",
 };

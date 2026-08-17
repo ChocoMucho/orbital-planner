@@ -58,7 +58,8 @@ function getStoredTextSize(): TextSizePreference {
 }
 
 const ITEM_MAP = new Map(ITEMS.map((item) => [item.id, item]));
-const ITEM_TARGETS = ITEMS.filter((item) => !item.raw && !item.building);
+const RECIPE_OUTPUT_IDS = new Set(RECIPES.map((recipe) => recipe.outputId));
+const ITEM_TARGETS = ITEMS.filter((item) => !item.building && RECIPE_OUTPUT_IDS.has(item.id));
 const BUILDING_TARGETS = ITEMS.filter((item) => item.building);
 const RARE_RAW_IDS = ITEMS.filter((item) => item.rareRaw).map((item) => item.id);
 

@@ -28,6 +28,8 @@ test("server-renders the DSP production calculator", async () => {
   assert.match(html, /생산 물품 추가/);
   assert.match(html, /아이템 계산기/);
   assert.match(html, /건물 계산기/);
+  assert.match(html, /86(?:<!-- -->)? ITEMS/);
+  assert.match(html, /<b>156<\/b> 레시피/);
   assert.match(html, /읽기 설정 열기/);
   assert.match(html, /61(?:<!-- -->)? BUILDINGS/);
   assert.match(html, /item-icon-sprite/);

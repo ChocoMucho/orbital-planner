@@ -4,7 +4,8 @@ export type FacilityCategory =
   | "chemical"
   | "refinery"
   | "lab"
-  | "collider";
+  | "collider"
+  | "ray_receiver";
 
 export interface Item {
   id: string;

@@ -65,6 +65,75 @@ test("bundles real icons and complete production chains for all building targets
   }
 });
 
+test("bundles every modeled item product with a complete production chain", () => {
+  const recipeOutputIds = new Set(RECIPES.map((entry: { outputId: string }) => entry.outputId));
+  const itemTargets = ITEMS.filter(
+    (entry: { id: string; building?: boolean }) => !entry.building && recipeOutputIds.has(entry.id),
+  );
+
+  assert.equal(itemTargets.length, 86);
+  for (const target of itemTargets) {
+    const result = calculateProduction({
+      items: ITEMS,
+      recipes: RECIPES,
+      machines: MACHINES,
+      target: { itemId: target.id, ratePerMin: 1 },
+      selections: { machineByCategory: DEFAULT_MACHINE_IDS },
+    });
+    assert.equal(result.tree.raw, false, `${target.id} should have a production recipe`);
+    assert.ok(result.rows.length > 0, `${target.id} should expand to at least one production row`);
+  }
+});
+
+test("calculates logistics carriers and critical photons with their real producers", () => {
+  const drone = calculateProduction({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    target: { itemId: "logistics_drone", ratePerMin: 60 },
+    selections: { machineByCategory: DEFAULT_MACHINE_IDS },
+  });
+  assert.equal(drone.rows.find((row: { itemId: string }) => row.itemId === "logistics_drone")?.roundedMachines, 3);
+  assert.equal(drone.rows.find((row: { itemId: string }) => row.itemId === "thruster")?.ratePerMin, 120);
+
+  const photons = calculateProduction({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    target: { itemId: "critical_photon", ratePerMin: 60 },
+    selections: { machineByCategory: DEFAULT_MACHINE_IDS, productMultiplier: 1.25 },
+  });
+  assert.equal(photons.rows[0]?.machineId, "ray-receiver");
+  assert.equal(photons.rows[0]?.exactMachines, 10);
+  assert.equal(photons.rows[0]?.productMultiplier, 1);
+
+  const lensedPhotons = calculateProduction({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    target: { itemId: "critical_photon", ratePerMin: 60 },
+    selections: {
+      machineByCategory: DEFAULT_MACHINE_IDS,
+      recipeByItem: { critical_photon: "critical-photon-graviton" },
+    },
+  });
+  assert.equal(lensedPhotons.rows.find((row: { itemId: string }) => row.itemId === "critical_photon")?.exactMachines, 5);
+  assert.equal(lensedPhotons.rows.find((row: { itemId: string }) => row.itemId === "graviton_lens")?.ratePerMin, 0.5);
+});
+
+test("keeps Dark Fog drops as raw leaves in late-game combat recipes", () => {
+  const result = calculateProduction({
+    items: ITEMS,
+    recipes: RECIPES,
+    machines: MACHINES,
+    target: { itemId: "df_strange_annihilation_fuel_rod", ratePerMin: 1 },
+    selections: { machineByCategory: DEFAULT_MACHINE_IDS },
+  });
+
+  assert.equal(result.rawTotals.df_core_element, 1);
+  assert.equal(result.tree.raw, false);
+});
+
 test("calculates a Tesla Tower line through its intermediate materials", () => {
   const result = calculateProduction({
     items: ITEMS,
