@@ -34,7 +34,7 @@
 ## Windows에 설치하기
 
 1. [최신 Releases 페이지](https://github.com/ChocoMucho/orbital-planner/releases/latest)를 엽니다.
-2. `Orbital Planner_0.1.0_x64-setup.exe`를 내려받습니다.
+2. `Orbital-Planner_0.1.0_x64-setup.exe`를 내려받습니다.
 3. 내려받은 파일을 실행해 설치합니다.
 
 Windows 10/11 64비트용입니다. 처음 설치할 때 PC에 WebView2가 없다면 인터넷 연결이 필요할 수 있습니다. 아직 코드 서명을 적용하지 않았기 때문에 Windows SmartScreen이 표시되면 `추가 정보 → 실행`을 선택해야 할 수 있습니다.
