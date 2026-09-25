@@ -12,6 +12,55 @@ export type PlanTargetDraft = {
   unit: PlanUnit;
 };
 
+export type EditablePlanTarget = Omit<PlanTargetDraft, "rate"> & {
+  ratePerMin: number;
+};
+
+function toRatePerMinute(rate: number, unit: PlanUnit): number {
+  return unit === "second" ? rate * 60 : rate;
+}
+
+export function getEditablePlanTargetRate(target: Pick<EditablePlanTarget, "ratePerMin" | "unit">): number {
+  return target.unit === "second" ? target.ratePerMin / 60 : target.ratePerMin;
+}
+
+export function createEditablePlanTarget(target: PlanTargetDraft): EditablePlanTarget {
+  return {
+    id: target.id,
+    itemId: target.itemId,
+    ratePerMin: toRatePerMinute(target.rate, target.unit),
+    unit: target.unit,
+  };
+}
+
+export function serializeEditablePlanTarget(target: EditablePlanTarget): PlanTargetDraft {
+  return {
+    id: target.id,
+    itemId: target.itemId,
+    rate: getEditablePlanTargetRate(target),
+    unit: target.unit,
+  };
+}
+
+export function changeEditablePlanTargetUnit(target: EditablePlanTarget, unit: PlanUnit): EditablePlanTarget {
+  return target.unit === unit ? target : { ...target, unit };
+}
+
+export function setEditablePlanTargetRate(target: EditablePlanTarget, rate: number): EditablePlanTarget {
+  if (!Number.isFinite(rate) || rate <= 0) return target;
+  return { ...target, ratePerMin: toRatePerMinute(rate, target.unit) };
+}
+
+export function adjustEditablePlanTargetRate(target: EditablePlanTarget, delta: number): EditablePlanTarget {
+  const nextRatePerMin = target.ratePerMin + toRatePerMinute(delta, target.unit);
+  if (!Number.isFinite(nextRatePerMin) || nextRatePerMin <= 0) return target;
+
+  return {
+    ...target,
+    ratePerMin: Number(nextRatePerMin.toPrecision(15)),
+  };
+}
+
 export type ProductionPlanPayload = {
   schemaVersion: typeof PLAN_SCHEMA_VERSION;
   gameDataVersion: string;

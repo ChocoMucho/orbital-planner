@@ -5,9 +5,64 @@ const modelUrl = new URL("../app/lib/plan-model.ts", import.meta.url).href;
 const {
   PLAN_SCHEMA_VERSION,
   PlanValidationError,
+  adjustEditablePlanTargetRate,
+  changeEditablePlanTargetUnit,
+  createEditablePlanTarget,
   createProductionPlanPayload,
+  getEditablePlanTargetRate,
   parseProductionPlanPayload,
+  serializeEditablePlanTarget,
+  setEditablePlanTargetRate,
 } = await import(modelUrl);
+
+test("preserves the canonical production target while units change", () => {
+  let target = createEditablePlanTarget({
+    id: "small-rate",
+    itemId: "solar_sail",
+    rate: 0.1,
+    unit: "minute",
+  });
+
+  for (let index = 0; index < 100; index += 1) {
+    target = changeEditablePlanTargetUnit(target, "second");
+    assert.equal(target.ratePerMin, 0.1);
+    assert.equal(getEditablePlanTargetRate(target), 0.1 / 60);
+    target = changeEditablePlanTargetUnit(target, "minute");
+  }
+
+  assert.equal(target.ratePerMin, 0.1);
+  assert.equal(getEditablePlanTargetRate(target), 0.1);
+});
+
+test("keeps input edits, increments and saved plans on the same minute basis", () => {
+  let target = createEditablePlanTarget({
+    id: "editable-rate",
+    itemId: "solar_sail",
+    rate: 0.1,
+    unit: "minute",
+  });
+
+  target = changeEditablePlanTargetUnit(target, "second");
+  target = setEditablePlanTargetRate(target, 0.02);
+  assert.equal(target.ratePerMin, 1.2);
+
+  target = adjustEditablePlanTargetRate(target, 1);
+  assert.equal(target.ratePerMin, 61.2);
+  target = adjustEditablePlanTargetRate(target, -1);
+  assert.equal(target.ratePerMin, 1.2);
+
+  const unchanged = adjustEditablePlanTargetRate(target, -1);
+  assert.equal(unchanged, target);
+
+  const saved = serializeEditablePlanTarget(target);
+  assert.deepEqual(saved, {
+    id: "editable-rate",
+    itemId: "solar_sail",
+    rate: 0.02,
+    unit: "second",
+  });
+  assert.equal(createEditablePlanTarget(saved).ratePerMin, 1.2);
+});
 
 test("creates a versioned cloud-save payload from calculator inputs", () => {
   const payload = createProductionPlanPayload({

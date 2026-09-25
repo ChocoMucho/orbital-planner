@@ -23,16 +23,22 @@ import { CloudSessionProvider, useCloudSession } from "./lib/cloud-session";
 import { getDspIconPosition } from "./lib/dsp-icon-positions";
 import { buildProductionFlowGraph, layoutProductionFlowGraph, type ProductionFlowNode } from "./lib/production-flow-graph";
 import {
+  adjustEditablePlanTargetRate,
+  changeEditablePlanTargetUnit,
+  createEditablePlanTarget,
   createProductionPlanPayload,
+  getEditablePlanTargetRate,
+  serializeEditablePlanTarget,
+  setEditablePlanTargetRate,
+  type EditablePlanTarget,
   type FactoryPresetId,
-  type PlanTargetDraft,
   type PlanUnit,
   type ProductionPlanPayload,
 } from "./lib/plan-model";
 
 type Unit = PlanUnit;
 type FactoryPreset = FactoryPresetId;
-type TargetDraft = PlanTargetDraft;
+type TargetDraft = EditablePlanTarget;
 type CalculatorMode = "items" | "buildings";
 type ProductionView = "list" | "network";
 type TextSizePreference = "standard" | "comfortable" | "large";
@@ -300,7 +306,7 @@ function ProductionNetwork({ result, targetDrafts }: { result: ProductionPlanCal
                   {node.kind === "target" && (
                     <>
                       <div className="network-node-kicker"><span>TARGET {String(node.targetIndex + 1).padStart(2, "0")}</span><em>생산 목표</em></div>
-                      <div className="network-node-item"><ItemMark item={node.item as Item} small /><span><b>{node.item.name}</b><small>{targetDraft ? `${formatNumber(targetDraft.rate)}${targetDraft.unit === "second" ? "/초" : "/분"}` : renderRate(node.ratePerMin)}</small></span></div>
+                      <div className="network-node-item"><ItemMark item={node.item as Item} small /><span><b>{node.item.name}</b><small>{targetDraft ? `${formatNumber(getEditablePlanTargetRate(targetDraft))}${targetDraft.unit === "second" ? "/초" : "/분"}` : renderRate(node.ratePerMin)}</small></span></div>
                       <p>설정한 최종 생산량</p>
                     </>
                   )}
@@ -376,11 +382,11 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
   const [mode, setMode] = useState<CalculatorMode>("items");
   const [targetSets, setTargetSets] = useState<Record<CalculatorMode, TargetDraft[]>>({
     items: [
-      { id: "item-target-1", itemId: "small_carrier_rocket", rate: 60, unit: "minute" },
-      { id: "item-target-2", itemId: "solar_sail", rate: 30, unit: "second" },
+      { id: "item-target-1", itemId: "small_carrier_rocket", ratePerMin: 60, unit: "minute" },
+      { id: "item-target-2", itemId: "solar_sail", ratePerMin: 1800, unit: "second" },
     ],
     buildings: [
-      { id: "building-target-1", itemId: "tesla_tower", rate: 60, unit: "minute" },
+      { id: "building-target-1", itemId: "tesla_tower", ratePerMin: 60, unit: "minute" },
     ],
   });
   const nextTargetId = useRef(4);
@@ -420,7 +426,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
   };
 
   const planPayload = useMemo(() => createProductionPlanPayload({
-    targets,
+    targets: targets.map(serializeEditablePlanTarget),
     rarePriority,
     productMultiplier,
     factoryPreset,
@@ -431,7 +437,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
     const savedMode: CalculatorMode = ITEM_MAP.get(payload.targets[0]?.itemId ?? "")?.building ? "buildings" : "items";
     setTargetSets((current) => ({
       ...current,
-      [savedMode]: payload.targets.map((target) => ({ ...target })),
+      [savedMode]: payload.targets.map(createEditablePlanTarget),
     }));
     setMode(savedMode);
     setRarePriority(payload.settings.rarePriority);
@@ -445,7 +451,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
 
   const planTargets = useMemo(() => targets.map((target) => ({
     itemId: target.itemId,
-    ratePerMin: target.unit === "second" ? target.rate * 60 : target.rate,
+    ratePerMin: target.ratePerMin,
   })), [targets]);
 
   const filteredItems = useMemo(() => {
@@ -509,14 +515,22 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
     setTargets((current) => current.map((target) => target.id === id ? { ...target, ...patch } : target));
   };
 
-  const changeTargetUnit = (target: TargetDraft, nextUnit: Unit) => {
-    if (target.unit === nextUnit) return;
-    updateTarget(target.id, {
-      unit: nextUnit,
-      rate: nextUnit === "second"
-        ? Math.max(0.01, Number((target.rate / 60).toFixed(4)))
-        : Number((target.rate * 60).toFixed(2)),
-    });
+  const changeTargetUnit = (id: string, nextUnit: Unit) => {
+    setTargets((current) => current.map((target) => target.id === id
+      ? changeEditablePlanTargetUnit(target, nextUnit)
+      : target));
+  };
+
+  const setTargetRate = (id: string, rate: number) => {
+    setTargets((current) => current.map((target) => target.id === id
+      ? setEditablePlanTargetRate(target, rate)
+      : target));
+  };
+
+  const adjustTargetRate = (id: string, delta: number) => {
+    setTargets((current) => current.map((target) => target.id === id
+      ? adjustEditablePlanTargetRate(target, delta)
+      : target));
   };
 
   const addTarget = () => {
@@ -524,7 +538,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
     const nextItem = targetItems.find((item) => !selected.has(item.id));
     if (!nextItem) return;
     const id = `target-${nextTargetId.current++}`;
-    setTargets((current) => [...current, { id, itemId: nextItem.id, rate: 60, unit: "minute" }]);
+    setTargets((current) => [...current, { id, itemId: nextItem.id, ratePerMin: 60, unit: "minute" }]);
     setPickerOpen(id);
     setQuery("");
   };
@@ -538,7 +552,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
     if (!result) return;
     const lines = [
       `[오비탈 플래너] ${targets.length}개 생산 목표`,
-      ...targets.map((target) => `${ITEM_MAP.get(target.itemId)?.name}: ${formatNumber(target.rate)}${target.unit === "second" ? "/초" : "/분"}`),
+      ...targets.map((target) => `${ITEM_MAP.get(target.itemId)?.name}: ${formatNumber(getEditablePlanTargetRate(target))}${target.unit === "second" ? "/초" : "/분"}`),
       `설비 ${formatNumber(result.totalRoundedMachines, 0)}대 · 기본 부하 ${formatNumber(result.totalPowerMw)} MW`,
       ...rawEntries.map(({ item, value }) => `${item.name}: ${formatNumber(value)}/분`),
     ];
@@ -601,6 +615,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
               const targetItem = ITEM_MAP.get(draft.itemId) ?? targetItems[0];
               const entriesForTarget = filteredItems.filter((item) => item.id === draft.itemId || !targets.some((other) => other.id !== draft.id && other.itemId === item.id));
               const increment = draft.unit === "second" ? 1 : 10;
+              const displayedRate = getEditablePlanTargetRate(draft);
               return (
                 <div className="target-entry" key={draft.id}>
                   <div className="target-entry-head">
@@ -645,13 +660,13 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
                     </div>
                     <div className="target-rate-control">
                       <div className="rate-control rate-control--compact">
-                        <button type="button" onClick={() => updateTarget(draft.id, { rate: Math.max(0.01, draft.rate - increment) })} aria-label={`${targetItem.name} 생산량 감소`}>−</button>
-                        <input id={`target-rate-${draft.id}`} aria-label={`${targetItem.name} 목표 생산량`} type="number" min="0.01" step={draft.unit === "second" ? 0.1 : 1} value={draft.rate} onChange={(event) => updateTarget(draft.id, { rate: Math.max(0.01, Number(event.target.value) || 0.01) })} />
-                        <button type="button" onClick={() => updateTarget(draft.id, { rate: draft.rate + increment })} aria-label={`${targetItem.name} 생산량 증가`}>＋</button>
+                        <button type="button" onClick={() => adjustTargetRate(draft.id, -increment)} aria-label={`${targetItem.name} 생산량 감소`}>−</button>
+                        <input id={`target-rate-${draft.id}`} aria-label={`${targetItem.name} 목표 생산량`} type="number" min="0" step="any" value={displayedRate} onChange={(event) => setTargetRate(draft.id, Number(event.target.value))} />
+                        <button type="button" onClick={() => adjustTargetRate(draft.id, increment)} aria-label={`${targetItem.name} 생산량 증가`}>＋</button>
                       </div>
                       <div className="unit-tabs" role="group" aria-label={`${targetItem.name} 생산량 단위`}>
-                        <button type="button" className={draft.unit === "minute" ? "active" : ""} onClick={() => changeTargetUnit(draft, "minute")}>/분</button>
-                        <button type="button" className={draft.unit === "second" ? "active" : ""} onClick={() => changeTargetUnit(draft, "second")}>/초</button>
+                        <button type="button" className={draft.unit === "minute" ? "active" : ""} onClick={() => changeTargetUnit(draft.id, "minute")}>/분</button>
+                        <button type="button" className={draft.unit === "second" ? "active" : ""} onClick={() => changeTargetUnit(draft.id, "second")}>/초</button>
                       </div>
                     </div>
                   </div>
@@ -705,7 +720,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
               <div className="result-actions">
                 <div className="result-target-summary">
                   <b>{targets.length}개 목표 동시 계산</b>
-                  <span>{targets.map((draft) => `${ITEM_MAP.get(draft.itemId)?.name} ${formatNumber(draft.rate)}${draft.unit === "second" ? "/초" : "/분"}`).join(" · ")}</span>
+                  <span>{targets.map((draft) => `${ITEM_MAP.get(draft.itemId)?.name} ${formatNumber(getEditablePlanTargetRate(draft))}${draft.unit === "second" ? "/초" : "/분"}`).join(" · ")}</span>
                 </div>
                 <button type="button" onClick={copySummary}>{copied ? "복사됨 ✓" : "요약 복사"}</button>
               </div>
@@ -773,7 +788,7 @@ function CalculatorWorkspace({ textSize, onTextSizeChange }: { textSize: TextSiz
                           <div className="tree-target-banner">
                             <span>TARGET {String(index + 1).padStart(2, "0")}</span>
                             <b>{tree.item.name}</b>
-                            <em>{formatNumber(draft?.rate ?? tree.ratePerMin)}{draft?.unit === "second" ? "/초" : "/분"}</em>
+                            <em>{formatNumber(draft ? getEditablePlanTargetRate(draft) : tree.ratePerMin)}{draft?.unit === "second" ? "/초" : "/분"}</em>
                           </div>
                           <TreeBranch node={tree} depth={0} path={`root-${index}`} beltCapacity={beltCapacity} unit={draft?.unit ?? "minute"} />
                         </div>
